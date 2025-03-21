@@ -9,9 +9,9 @@ from opendbc.car import DT_CTRL
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.structs import CarParams
 from opendbc.car.tests.test_car_interfaces import get_fuzzy_car_interface_args
-from opendbc.car.fingerprints import all_known_cars
 from opendbc.car.fw_versions import FW_VERSIONS, FW_QUERY_CONFIGS
 from opendbc.car.mock.values import CAR as MOCK
+from opendbc.car.values import PLATFORMS
 from openpilot.selfdrive.car.helpers import convert_carControlSP
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
@@ -30,21 +30,21 @@ MAX_EXAMPLES = int(os.environ.get('MAX_EXAMPLES', '60'))
 class TestCarInterfaces:
   # FIXME: Due to the lists used in carParams, Phase.target is very slow and will cause
   #  many generated examples to overrun when max_examples > ~20, don't use it
-  @parameterized.expand([(car,) for car in sorted(all_known_cars())] + [MOCK.MOCK])
+  @parameterized.expand([(car,) for car in sorted(PLATFORMS)] + [MOCK.MOCK])
   @settings(max_examples=MAX_EXAMPLES, deadline=None,
             phases=(Phase.reuse, Phase.generate, Phase.shrink))
   @given(data=st.data())
   def test_car_interfaces(self, car_name, data):
-    CarInterface, CarController, CarState, RadarInterface = interfaces[car_name]
+    CarInterface = interfaces[car_name]
 
     args = get_fuzzy_car_interface_args(data.draw)
 
     car_params = CarInterface.get_params(car_name, args['fingerprints'], args['car_fw'],
                                          experimental_long=args['experimental_long'], docs=False)
     car_params_sp = CarInterface.get_params_sp(car_params, car_name, args['fingerprints'], args['car_fw'],
-                                                           experimental_long=args['experimental_long'], docs=False)
+                                               experimental_long=args['experimental_long'], docs=False)
     car_params = car_params.as_reader()
-    car_interface = CarInterface(car_params, car_params_sp, CarController, CarState)
+    car_interface = CarInterface(car_params, car_params_sp)
     assert car_params
     assert car_params_sp
     assert car_interface
@@ -87,6 +87,8 @@ class TestCarInterfaces:
 
     CC = car.CarControl.new_message(**cc_msg)
     CC.enabled = True
+    CC.latActive = True
+    CC.longActive = True
     CC = CC.as_reader()
     for _ in range(10):
       car_interface.update([])
@@ -98,8 +100,8 @@ class TestCarInterfaces:
     #  hypothesis also slows down significantly with just one more message draw
     LongControl(car_params)
     if car_params.steerControlType == CarParams.SteerControlType.angle:
-      LatControlAngle(car_params, car_interface)
+      LatControlAngle(car_params, car_params_sp, car_interface)
     elif car_params.lateralTuning.which() == 'pid':
-      LatControlPID(car_params, car_interface)
+      LatControlPID(car_params, car_params_sp, car_interface)
     elif car_params.lateralTuning.which() == 'torque':
-      LatControlTorque(car_params, car_interface)
+      LatControlTorque(car_params, car_params_sp, car_interface)

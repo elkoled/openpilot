@@ -1,4 +1,4 @@
-from collections import namedtuple
+#!/usr/bin/env python3
 import capnp
 import json
 import pathlib
@@ -9,6 +9,7 @@ import pywinctl
 import pyautogui
 import pickle
 import time
+from collections import namedtuple
 
 from cereal import car, log
 from msgq.visionipc import VisionIpcServer, VisionStreamType
@@ -58,6 +59,10 @@ def setup_settings_software(click, pm: PubMaster, scroll=None):
   setup_settings_device(click, pm)
   click(278, 742)
   time.sleep(UI_DELAY)
+
+def setup_settings_firehose(click, pm: PubMaster, scroll=None):
+  scroll(-400, 278, 962)
+  click(278, 862)
 
 def setup_settings_developer(click, pm: PubMaster, scroll=None):
   CP = car.CarParams()
@@ -202,6 +207,11 @@ def setup_settings_sunnylink(click, pm: PubMaster, scroll=None):
   click(278, 522)
   time.sleep(UI_DELAY)
 
+def setup_settings_sunnylink_sponsor_button(click, pm: PubMaster, scroll=None):
+  setup_settings_sunnylink(click, pm)
+  click(1967, 225)
+  time.sleep(UI_DELAY)
+
 def setup_settings_sunnypilot(click, pm: PubMaster, scroll=None):
   setup_settings_device(click, pm)
   click(278, 852)
@@ -229,8 +239,8 @@ def setup_settings_vehicle(click, pm: PubMaster, scroll=None):
   ))
 
   setup_settings_device(click, pm)
-  scroll(-400, 278, 862)
-  click(278, 862)
+  scroll(-400, 278, 962)
+  click(278, 754)
   time.sleep(UI_DELAY)
 
 CASES = {
@@ -242,6 +252,7 @@ CASES = {
   "settings_network_advanced": setup_settings_network_advanced,
   "settings_toggles": setup_settings_toggles,
   "settings_software": setup_settings_software,
+  "settings_firehose": setup_settings_firehose,
   "settings_developer": setup_settings_developer,
   "onroad": setup_onroad,
   "onroad_disengaged": setup_onroad_disengaged,
@@ -262,6 +273,7 @@ CASES = {
 
 CASES.update({
   "settings_sunnylink": setup_settings_sunnylink,
+  "settings_sunnylink_sponsor_button": setup_settings_sunnylink_sponsor_button,
   "settings_sunnypilot": setup_settings_sunnypilot,
   "settings_sunnypilot_mads": setup_settings_sunnypilot_mads,
   "settings_trips": setup_settings_trips,
