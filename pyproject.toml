@@ -11,6 +11,7 @@ authors = [
 dependencies = [
   # assistant
   "ollama",
+  "pillow", # remove after testing
 
   # multiple users
   "sounddevice",  # micd + soundd
