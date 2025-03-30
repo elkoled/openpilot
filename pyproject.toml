@@ -9,6 +9,9 @@ authors = [
 ]
 
 dependencies = [
+  # assistant
+  "ollama",
+
   # multiple users
   "sounddevice",  # micd + soundd
   "pyserial",     # pigeond + qcomgpsd
