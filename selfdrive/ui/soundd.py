@@ -12,6 +12,8 @@ from openpilot.common.retry import retry
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.system import micd
+from pathlib import Path
+import os
 
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
@@ -61,6 +63,8 @@ class Soundd:
     self.selfdrive_timeout_alert = False
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
+    self.custom_sound_data = None
+    self.custom_sound_frame = 0
 
   def load_sounds(self):
     self.loaded_sounds: dict[int, np.ndarray] = {}
@@ -77,26 +81,41 @@ class Soundd:
         length = wavefile.getnframes()
         self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
 
-  def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
+  def play_audio_buffer(self, wav_path):
+    import wave
+    try:
+      with wave.open(str(wav_path), 'rb') as wavefile:
+        assert wavefile.getnchannels() == 1
+        assert wavefile.getsampwidth() == 2
+        assert wavefile.getframerate() == SAMPLE_RATE
 
+        frames = wavefile.getnframes()
+        self.custom_sound_data = np.frombuffer(wavefile.readframes(frames), dtype=np.int16).astype(np.float32) / (2**16 / 2)
+        self.custom_sound_frame = 0
+
+        cloudlog.info(f"[soundd] Loaded and scheduled playback: {wav_path}")
+    except Exception as e:
+      cloudlog.exception(f"[soundd] Failed to load custom audio file: {e}")
+
+  def get_sound_data(self, frames):
     ret = np.zeros(frames, dtype=np.float32)
 
-    if self.current_alert != AudibleAlert.none:
-      num_loops = sound_list[self.current_alert][1]
-      sound_data = self.loaded_sounds[self.current_alert]
-      written_frames = 0
+    # If a custom sound is loaded, play it once
+    if self.custom_sound_data is not None:
+      remaining = len(self.custom_sound_data) - self.custom_sound_frame
+      play_len = min(frames, remaining)
+      ret[:play_len] = self.custom_sound_data[self.custom_sound_frame:self.custom_sound_frame + play_len]
+      self.custom_sound_frame += play_len
 
-      current_sound_frame = self.current_sound_frame % len(sound_data)
-      loops = self.current_sound_frame // len(sound_data)
+      # Reset after playing once
+      if self.custom_sound_frame >= len(self.custom_sound_data):
+        self.custom_sound_data = None
+        self.custom_sound_frame = 0
 
-      while written_frames < frames and (num_loops is None or loops < num_loops):
-        available_frames = sound_data.shape[0] - current_sound_frame
-        frames_to_write = min(available_frames, frames - written_frames)
-        ret[written_frames:written_frames+frames_to_write] = sound_data[current_sound_frame:current_sound_frame+frames_to_write]
-        written_frames += frames_to_write
-        self.current_sound_frame += frames_to_write
+      return ret * MAX_VOLUME
 
-    return ret * self.current_volume
+    # Otherwise, ignore all alerts and return silence
+    return ret
 
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
     if status:
@@ -143,6 +162,10 @@ class Soundd:
       cloudlog.info(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}")
       while True:
         sm.update(0)
+
+        if Path("/tmp/play.wav").exists() and self.custom_sound_data is None:
+          self.play_audio_buffer(Path("/tmp/play.wav"))
+          os.remove("/tmp/play.wav")
 
         if sm.updated['microphone'] and self.current_alert == AudibleAlert.none: # only update volume filter when not playing alert
           self.spl_filter_weighted.update(sm["microphone"].soundPressureWeightedDb)
