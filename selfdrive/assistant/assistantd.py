@@ -48,21 +48,25 @@ openai_client = OpenAI()
 
 def build_prompt_user(buffer_size, fps):
   sm = messaging.SubMaster(['carState'])
-  sm.update(100)  # non-blocking update
+  start = time.monotonic()
+  while not sm.updated['carState']:
+    sm.update(100)
+    if time.monotonic() - start > 1.0:
+        return "Vehicle telemetry not available yet. Use visual cues only."
 
   cs = sm['carState']
 
   # Fallbacks
-  speed_kph = round(cs.vEgoCluster * 3.6) if cs.vEgoCluster else 0
-  acceleration = round(cs.aEgo, 2) if cs.aEgo else 0
+  speed_kph = round(cs.vEgoCluster * 3.6) if cs.vEgoCluster is not None else 0
+  acceleration = round(cs.aEgo, 2) if cs.aEgo is not None else 0
   steering_angle = round(cs.steeringAngleDeg, 1)
   steering_torque = round(cs.steeringTorque, 2)
   steering_rate = round(cs.steeringRateDeg, 2)
   yaw_rate = round(cs.yawRate, 2)
   cruise_enabled = cs.cruiseState.enabled
-  cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed else 0
+  cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed is not None else 0
   cruise_standstill = cs.cruiseState.standstill
-  gas_pct = round(cs.gas * 100) if cs.gas else 0
+  gas_pct = round(cs.gas * 100) if cs.gas is not None else 0
   brake_hold = cs.brakeHoldActive
   esp_disabled = cs.espDisabled
   steering_override = cs.steeringPressed
@@ -93,8 +97,6 @@ def build_prompt_user(buffer_size, fps):
     + additional_info +
     "Generate exactly one spoken sentence based only on the telemetry and what you see. Do not add explanations."
   )
-
-
 
 def decode_nv12_to_jpeg(nv12_bytes):
     try:
@@ -191,7 +193,7 @@ def assistantd():
     response_timeout_sec = 20  # maximum time to wait for model
 
     while True:
-        buf = vision_client .recv()
+        buf = vision_client.recv()
         if buf is None:
             time.sleep(0.05)
             continue
@@ -208,10 +210,16 @@ def assistantd():
         if not waiting_for_response and now - last_capture_time >= capture_interval:
             last_capture_time = now
             encoded = decode_nv12_to_jpeg(bytes(buf.data))
-            if encoded:
-                frame_buffer.append(encoded)
+            if not encoded:
+                cloudlog.warning("[ASSISTANT] Frame encoding failed — skipping")
+                continue
+            frame_buffer.append(encoded)
 
         if not waiting_for_response and len(frame_buffer) >= BUFFER_SIZE:
+            if len(frame_buffer) < BUFFER_SIZE:
+                cloudlog.warning("[ASSISTANT] Not enough frames collected")
+                continue
+
             response_start_time = now
             waiting_for_response = True
             try:
