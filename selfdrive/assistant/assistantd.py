@@ -13,6 +13,7 @@ from ollama import chat
 from openai import OpenAI
 from pathlib import Path
 from pydub import AudioSegment
+import cereal.messaging as messaging
 
 # ==== CONFIGURATION ====
 LLM_BACKEND = "openai"  # Options: "ollama", "openai"
@@ -24,22 +25,76 @@ FRAME_HEIGHT = 1208
 FRAMES_PER_SEC = 1        # Capture rate
 BUFFER_SIZE = 5           # How many frames to collect before sending
 PROMPT_SYSTEM = (
-    "You are a real-time driving assistant. Given a sequence of dashcam images taken over several seconds, "
-    "generate exactly one short spoken sentence for the driver. "
-    "Focus on what is visible: road signs, speed limits, pedestrians, vehicles, curves, traffic lights, weather, or hazards. "
-    "Do not include explanations or summaries. Only output the sentence the driver should hear — concise and relevant."
+    "You are a real-time driving assistant. Your goal is to help the driver stay safe, alert, and informed "
+    "while driving. You receive a short sequence of dashcam images and live vehicle telemetry. "
+    "Generate exactly one spoken sentence that is clear, useful, and timely. "
+    "Prioritize important road information such as: speed limit signs, traffic signs, pedestrians, road curvature, "
+    "traffic lights, vehicle distance, obstacles, and hazards. "
+    "Avoid summarizing or describing — speak directly as if you're giving driving instructions. "
+    "The sentence should be what the driver hears in the moment, not a report or explanation."
 )
-PROMPT_USER = (
-    f"The following {BUFFER_SIZE} dashcam frames were captured at a rate of {FRAMES_PER_SEC} frames per second, "
-    f"representing the last {int(BUFFER_SIZE / FRAMES_PER_SEC)} seconds of driving. "
-    "Generate one clear and useful sentence the driver should hear."
-)
+PROMPT_USER = ""
+# PROMPT_USER = (
+#     f"The following {BUFFER_SIZE} dashcam frames were captured at a rate of {FRAMES_PER_SEC} frames per second, "
+#     f"representing the last {int(BUFFER_SIZE / FRAMES_PER_SEC)} seconds of driving. "
+#     "Generate one clear and useful sentence the driver should hear."
+# )
 # ========================
 
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
 # os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 openai_client = OpenAI()
+
+def build_prompt_user(buffer_size, fps):
+  sm = messaging.SubMaster(['carState'])
+  sm.update(100)  # non-blocking update
+
+  cs = sm['carState']
+
+  # Fallbacks
+  speed_kph = round(cs.vEgoCluster * 3.6) if cs.vEgoCluster else 0
+  acceleration = round(cs.aEgo, 2) if cs.aEgo else 0
+  steering_angle = round(cs.steeringAngleDeg, 1)
+  steering_torque = round(cs.steeringTorque, 2)
+  steering_rate = round(cs.steeringRateDeg, 2)
+  yaw_rate = round(cs.yawRate, 2)
+  cruise_enabled = cs.cruiseState.enabled
+  cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed else 0
+  cruise_standstill = cs.cruiseState.standstill
+  gas_pct = round(cs.gas * 100) if cs.gas else 0
+  brake_hold = cs.brakeHoldActive
+  esp_disabled = cs.espDisabled
+  steering_override = cs.steeringPressed
+  standstill = cs.standstill
+
+  wheel_speeds = cs.wheelSpeeds
+  avg_wheel_speed = round((wheel_speeds.fl + wheel_speeds.fr + wheel_speeds.rl + wheel_speeds.rr) / 4 * 3.6, 1)
+
+  motion_state = "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h"
+
+  additional_info = (
+    f"{motion_state} Avg wheel speed: {avg_wheel_speed} km/h, acceleration: {acceleration} m/s², "
+    f"yaw rate: {yaw_rate}°/s, steering angle: {steering_angle}°, rate: {steering_rate}°/s, torque: {steering_torque}, "
+    f"gas: {gas_pct}%. "
+    f"{'Cruise control active at ' + str(cruise_speed) + ' km/h. ' if cruise_enabled else ''}"
+    f"{'Cruise is waiting to resume from standstill. ' if cruise_standstill else ''}"
+    f"{'Brake hold is active. ' if brake_hold else ''}"
+    f"{'Driver is overriding steering. ' if steering_override else ''}"
+    f"{'Warning: Stability control (ESP) is disabled. ' if esp_disabled else ''}"
+  )
+
+  return (
+    f"The following {buffer_size} dashcam frames were captured at a rate of {fps} frames per second, "
+    f"representing the last {int(buffer_size / fps)} seconds of driving. "
+    "You are a real-time co-pilot and assistant, helping the driver with concise spoken messages. "
+    "Focus **especially** on visible speed limit signs, street signs, curves, pedestrians, traffic lights, and any potential hazards. "
+    "Give safety-relevant and regulation-relevant messages first. Avoid repetition. "
+    + additional_info +
+    "Generate exactly one spoken sentence based only on the telemetry and what you see. Do not add explanations."
+  )
+
+
 
 def decode_nv12_to_jpeg(nv12_bytes):
     try:
@@ -161,6 +216,8 @@ def assistantd():
             waiting_for_response = True
             try:
                 cloudlog.info(f"[ASSISTANT] Captured {len(frame_buffer)} frames, starting model inference")
+                PROMPT_USER = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
+                cloudlog.warning(PROMPT_USER)
                 if LLM_BACKEND == "ollama":
                     result = send_to_ollama(frame_buffer)
                 elif LLM_BACKEND == "openai":

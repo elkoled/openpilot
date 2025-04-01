@@ -10,8 +10,12 @@ authors = [
 
 dependencies = [
   # assistant
-  "ollama",
-  "pillow", # remove after testing
+  "ollama", # TODO: remove after testing
+  "openai", # TODO: remove after testing
+  "pillow", # TODO: remove after testing
+  "pydub", # TODO: remove after testing
+  # uv pip install ollama openai pillow pydub
+  # export OPENAI_API_KEY=""
 
   # multiple users
   "sounddevice",  # micd + soundd
