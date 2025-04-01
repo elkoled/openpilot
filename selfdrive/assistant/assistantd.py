@@ -116,13 +116,13 @@ def decode_nv12_to_jpeg(nv12_bytes):
         cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
         return None
 
-def send_to_ollama(images_b64):
+def send_to_ollama(images_b64, user_prompt):
     try:
         response = chat(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": PROMPT_SYSTEM},
-                {"role": "user", "content": PROMPT_USER, "images": images_b64}
+                {"role": "user", "content": user_prompt, "images": images_b64}
             ]
         )
         return response.message.content.strip()
@@ -130,9 +130,9 @@ def send_to_ollama(images_b64):
         cloudlog.exception(f"[ASSISTANT] send_to_model: {e}")
         return ""
 
-def send_to_openai(images_b64):
+def send_to_openai(images_b64, user_prompt):
     try:
-        content = [{"type": "text", "text": PROMPT_USER}]
+        content = [{"type": "text", "text": user_prompt}]
         for image_b64 in images_b64:
             content.append({
                 "type": "image_url",
@@ -216,12 +216,12 @@ def assistantd():
             waiting_for_response = True
             try:
                 cloudlog.info(f"[ASSISTANT] Captured {len(frame_buffer)} frames, starting model inference")
-                PROMPT_USER = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
-                cloudlog.warning(PROMPT_USER)
+                user_prompt = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
+                cloudlog.warning(user_prompt)
                 if LLM_BACKEND == "ollama":
-                    result = send_to_ollama(frame_buffer)
+                    result = send_to_ollama(frame_buffer, user_prompt)
                 elif LLM_BACKEND == "openai":
-                    result = send_to_openai(frame_buffer)
+                    result = send_to_openai(frame_buffer, user_prompt)
                 else:
                     raise ValueError(f"[ASSISTANT] Unknown LLM_BACKEND: {LLM_BACKEND}")
 
