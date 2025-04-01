@@ -10,6 +10,7 @@ from msgq.visionipc import VisionIpcClient, VisionStreamType
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from ollama import chat
+from openai import OpenAI
 
 # ==== CONFIGURATION ====
 OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
@@ -32,6 +33,9 @@ PROMPT_USER = (
 # ========================
 
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
+# os.environ["OPENAI_API_KEY"]
+
+client = OpenAI()
 
 def decode_nv12_to_jpeg(nv12_bytes):
     try:
@@ -50,10 +54,10 @@ def decode_nv12_to_jpeg(nv12_bytes):
         img.save(buf, format="JPEG")
         return base64.b64encode(buf.getvalue()).decode()
     except Exception as e:
-        cloudlog.exception(f"decode_nv12_to_jpeg: {e}")
+        cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
         return None
 
-def send_to_model(images_b64):
+def send_to_ollama(images_b64):
     try:
         response = chat(
             model=MODEL_NAME,
@@ -64,7 +68,31 @@ def send_to_model(images_b64):
         )
         return response.message.content.strip()
     except Exception as e:
-        cloudlog.exception(f"send_to_model: {e}")
+        cloudlog.exception(f"[ASSISTANT] send_to_model: {e}")
+        return ""
+
+def send_to_openai(images_b64):
+    try:
+        content = [{"type": "text", "text": PROMPT_USER}]
+        for image_b64 in images_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{image_b64}",
+                    "detail": "auto"
+                }
+            })
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": PROMPT_SYSTEM},
+                {"role": "user", "content": content}
+            ]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        cloudlog.exception(f"[ASSISTANT] send_to_openai: {e}")
         return ""
 
 def assistantd():
@@ -77,25 +105,45 @@ def assistantd():
     frame_buffer = []
     last_capture_time = 0
     capture_interval = 1.0 / FRAMES_PER_SEC
+    waiting_for_response = False
+    response_start_time = None
+    response_timeout_sec = 20  # maximum time to wait for model
 
     while True:
         buf = client.recv()
         if buf is None:
+            time.sleep(0.05)
             continue
 
         now = time.monotonic()
-        if now - last_capture_time >= capture_interval:
+
+        # If we're waiting too long for a response, reset
+        if waiting_for_response and now - response_start_time > response_timeout_sec:
+            cloudlog.warning("[ASSISTANT] Model response timeout — skipping")
+            waiting_for_response = False
+            frame_buffer.clear()
+
+        # Only collect frames if not waiting
+        if not waiting_for_response and now - last_capture_time >= capture_interval:
             last_capture_time = now
             encoded = decode_nv12_to_jpeg(bytes(buf.data))
             if encoded:
                 frame_buffer.append(encoded)
 
-        if len(frame_buffer) >= BUFFER_SIZE:
-            result = send_to_model(frame_buffer)
-            if result and result != last_result:
-                cloudlog.warning(f"[DASHCAM-ASSIST] {result}")
-                last_result = result
-            frame_buffer.clear()
+        if not waiting_for_response and len(frame_buffer) >= BUFFER_SIZE:
+            response_start_time = now
+            waiting_for_response = True
+            try:
+                cloudlog.info(f"[ASSISTANT] Captured {len(frame_buffer)} frames, starting model inference")
+                result = send_to_openai(frame_buffer)
+                if result and result != last_result:
+                    cloudlog.warning(f"[ASSISTANT] {result}")
+                    last_result = result
+            except Exception as e:
+                cloudlog.exception("[ASSISTANT] send_to_model failed")
+            finally:
+                waiting_for_response = False
+                frame_buffer.clear()
 
         time.sleep(0.05)
 
