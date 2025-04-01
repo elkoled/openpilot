@@ -22,23 +22,17 @@ OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
 MODEL_NAME = "gemma3"
 FRAME_WIDTH = 1928
 FRAME_HEIGHT = 1208
-FRAMES_PER_SEC = 1        # Capture rate
+FRAMES_PER_SEC = 0.5        # Capture rate
 BUFFER_SIZE = 5           # How many frames to collect before sending
 PROMPT_SYSTEM = (
     "You are a real-time driving assistant. Your goal is to help the driver stay safe, alert, and informed "
     "while driving. You receive a short sequence of dashcam images and live vehicle telemetry. "
     "Generate exactly one spoken sentence that is clear, useful, and timely. "
-    "Prioritize important road information such as: speed limit signs, traffic signs, pedestrians, road curvature, "
+    "Prioritize important road information such as: speed limit signs, traffic signs, pedestrians, "
     "traffic lights, vehicle distance, obstacles, and hazards. "
     "Avoid summarizing or describing — speak directly as if you're giving driving instructions. "
     "The sentence should be what the driver hears in the moment, not a report or explanation."
 )
-PROMPT_USER = ""
-# PROMPT_USER = (
-#     f"The following {BUFFER_SIZE} dashcam frames were captured at a rate of {FRAMES_PER_SEC} frames per second, "
-#     f"representing the last {int(BUFFER_SIZE / FRAMES_PER_SEC)} seconds of driving. "
-#     "Generate one clear and useful sentence the driver should hear."
-# )
 # ========================
 
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
@@ -134,24 +128,33 @@ def send_to_ollama(images_b64, user_prompt):
 
 def send_to_openai(images_b64, user_prompt):
     try:
-        content = [{"type": "text", "text": user_prompt}]
-        for image_b64 in images_b64:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{image_b64}",
-                    "detail": "auto"
-                }
-            })
+        # Combine system prompt with user prompt in the first message
+        full_prompt = f"{PROMPT_SYSTEM}\n\n{user_prompt}"
 
-        response = openai_client.chat.completions.create(
+        input_content = [
+            {"type": "input_text", "text": full_prompt}
+        ] + [
+            {
+                "type": "input_image",
+                "image_url": f"data:image/jpeg;base64,{img}",
+                "detail": "high"
+            }
+            for img in images_b64
+        ]
+
+        cloudlog.warning(f"[ASSISTANT] Sending {len(images_b64)} images using OpenAI responses API")
+
+        response = openai_client.responses.create(
             model="gpt-4o",
-            messages=[
-                {"role": "system", "content": PROMPT_SYSTEM},
-                {"role": "user", "content": content}
+            input=[
+                {
+                    "role": "user",
+                    "content": input_content
+                }
             ]
         )
-        return response.choices[0].message.content.strip()
+
+        return response.output_text.strip()
     except Exception as e:
         cloudlog.exception(f"[ASSISTANT] send_to_openai: {e}")
         return ""
