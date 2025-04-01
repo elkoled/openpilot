@@ -12,6 +12,7 @@ from openpilot.common.swaglog import cloudlog
 from ollama import chat
 from openai import OpenAI
 from pathlib import Path
+from pydub import AudioSegment
 
 # ==== CONFIGURATION ====
 LLM_BACKEND = "openai"  # Options: "ollama", "openai"
@@ -98,20 +99,25 @@ def send_to_openai(images_b64):
         cloudlog.exception(f"[ASSISTANT] send_to_openai: {e}")
         return ""
 
-def play_tts_audio(text, file_path="/data/openpilot/selfdrive/assets/sounds/tts.wav"):
+def play_tts_audio(text):
     try:
+        temp_mp3 = Path("/tmp/tts.mp3")
+        final_wav = Path("/tmp/play.wav")
+
         with OpenAI().audio.speech.with_streaming_response.create(
             model="gpt-4o-mini-tts",
             voice="alloy",
             input=text,
-            response_format="wav",
+            response_format="mp3"
         ) as response:
-            response.stream_to_file(Path(file_path))
+            response.stream_to_file(temp_mp3)
 
-        # Create a flag file to notify soundd
-        Path("/tmp/play_tts.flag").touch()
+        # Resample from 24kHz to 48kHz mono WAV using pydub
+        audio = AudioSegment.from_file(temp_mp3)
+        audio = audio.set_frame_rate(48000).set_channels(1).set_sample_width(2)
+        audio.export(final_wav, format="wav")
 
-        print(f"[ASSISTANT] TTS saved: {text}")
+        print(f"[ASSISTANT] TTS ready at {final_wav}: {text}")
     except Exception as e:
         print(f"[ASSISTANT] play_tts_audio failed: {e}")
 
