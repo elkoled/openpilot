@@ -11,10 +11,11 @@ from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from ollama import chat
 from openai import OpenAI
+from pathlib import Path
 
 # ==== CONFIGURATION ====
-LLM_BACKEND = "ollama"  # Options: "ollama", "openai"
-OPENAI_API_KEY = ""
+LLM_BACKEND = "openai"  # Options: "ollama", "openai"
+# OPENAI_API_KEY = ""
 OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
 MODEL_NAME = "gemma3"
 FRAME_WIDTH = 1928
@@ -35,7 +36,7 @@ PROMPT_USER = (
 # ========================
 
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+# os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
 openai_client = OpenAI()
 
@@ -97,6 +98,23 @@ def send_to_openai(images_b64):
         cloudlog.exception(f"[ASSISTANT] send_to_openai: {e}")
         return ""
 
+def play_tts_audio(text, file_path="/data/openpilot/selfdrive/assets/sounds/tts.wav"):
+    try:
+        with OpenAI().audio.speech.with_streaming_response.create(
+            model="gpt-4o-mini-tts",
+            voice="alloy",
+            input=text,
+            response_format="wav",
+        ) as response:
+            response.stream_to_file(Path(file_path))
+
+        # Create a flag file to notify soundd
+        Path("/tmp/play_tts.flag").touch()
+
+        print(f"[ASSISTANT] TTS saved: {text}")
+    except Exception as e:
+        print(f"[ASSISTANT] play_tts_audio failed: {e}")
+
 def assistantd():
     config_realtime_process([0, 1, 2, 3], priority=5)
     vision_client  = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
@@ -146,6 +164,7 @@ def assistantd():
 
                 if result and result != last_result:
                     cloudlog.warning(f"[ASSISTANT] {result}")
+                    play_tts_audio(result)
                     last_result = result
             except Exception as e:
                 cloudlog.exception("[ASSISTANT] send_to_model failed")
