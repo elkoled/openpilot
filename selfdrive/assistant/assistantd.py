@@ -76,7 +76,7 @@ def assistantd():
     last_result = ""
     frame_buffer = []
     last_capture_time = 0
-    capture_interval = FRAMES_PER_SEC
+    capture_interval = 1.0 / FRAMES_PER_SEC
 
     while True:
         buf = client.recv()
