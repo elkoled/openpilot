@@ -13,6 +13,8 @@ from ollama import chat
 from openai import OpenAI
 
 # ==== CONFIGURATION ====
+LLM_BACKEND = "ollama"  # Options: "ollama", "openai"
+OPENAI_API_KEY = ""
 OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
 MODEL_NAME = "gemma3"
 FRAME_WIDTH = 1928
@@ -33,9 +35,9 @@ PROMPT_USER = (
 # ========================
 
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
-# os.environ["OPENAI_API_KEY"]
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
-client = OpenAI()
+openai_client = OpenAI()
 
 def decode_nv12_to_jpeg(nv12_bytes):
     try:
@@ -83,7 +85,7 @@ def send_to_openai(images_b64):
                 }
             })
 
-        response = client.chat.completions.create(
+        response = openai_client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": PROMPT_SYSTEM},
@@ -97,8 +99,8 @@ def send_to_openai(images_b64):
 
 def assistantd():
     config_realtime_process([0, 1, 2, 3], priority=5)
-    client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
-    while not client.connect(False):
+    vision_client  = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
+    while not vision_client .connect(False):
         time.sleep(0.1)
 
     last_result = ""
@@ -110,7 +112,7 @@ def assistantd():
     response_timeout_sec = 20  # maximum time to wait for model
 
     while True:
-        buf = client.recv()
+        buf = vision_client .recv()
         if buf is None:
             time.sleep(0.05)
             continue
@@ -135,7 +137,13 @@ def assistantd():
             waiting_for_response = True
             try:
                 cloudlog.info(f"[ASSISTANT] Captured {len(frame_buffer)} frames, starting model inference")
-                result = send_to_openai(frame_buffer)
+                if LLM_BACKEND == "ollama":
+                    result = send_to_ollama(frame_buffer)
+                elif LLM_BACKEND == "openai":
+                    result = send_to_openai(frame_buffer)
+                else:
+                    raise ValueError(f"[ASSISTANT] Unknown LLM_BACKEND: {LLM_BACKEND}")
+
                 if result and result != last_result:
                     cloudlog.warning(f"[ASSISTANT] {result}")
                     last_result = result
