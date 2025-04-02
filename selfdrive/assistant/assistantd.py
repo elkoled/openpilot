@@ -94,52 +94,75 @@ def build_prompt_user(buffer_size, fps):
 
 def decode_nv12_to_jpeg(nv12_bytes):
     try:
+        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: starting with buffer size {len(nv12_bytes)} bytes")
+
         y_size = FRAME_WIDTH * FRAME_HEIGHT
         uv_size = y_size // 2
         expected_size = y_size + uv_size
 
-        actual_size = len(nv12_bytes)
-        if actual_size != expected_size:
-            cloudlog.error(f"[ASSISTANT] NV12 buffer size mismatch: expected={expected_size}, got={actual_size}")
+        if len(nv12_bytes) != expected_size:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: invalid buffer size - got {len(nv12_bytes)}, expected {expected_size}")
             return None
 
-        # Separate Y and UV data
-        y = np.frombuffer(nv12_bytes[0:y_size], dtype=np.uint8).reshape((FRAME_HEIGHT, FRAME_WIDTH))
-        uv = np.frombuffer(nv12_bytes[y_size:], dtype=np.uint8).reshape((FRAME_HEIGHT // 2, FRAME_WIDTH))
+        try:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: extracting Y plane ({y_size} bytes)")
+            y = np.frombuffer(nv12_bytes[:y_size], dtype=np.uint8).reshape((FRAME_HEIGHT, FRAME_WIDTH))
+        except Exception as e:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: Y plane extraction failed with {e}")
+            return None
 
-        # Split interleaved UV into U and V
-        u = uv[:, 0::2]
-        v = uv[:, 1::2]
+        try:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: extracting UV plane ({uv_size} bytes)")
+            uv = np.frombuffer(nv12_bytes[y_size:], dtype=np.uint8).reshape((FRAME_HEIGHT // 2, FRAME_WIDTH // 2, 2))
 
-        # Upsample U and V to full size using nearest-neighbor
-        u_up = np.repeat(np.repeat(u, 2, axis=1), 2, axis=0)
-        v_up = np.repeat(np.repeat(v, 2, axis=1), 2, axis=0)
+            u = np.zeros((FRAME_HEIGHT // 2, FRAME_WIDTH // 2), dtype=np.uint8)
+            v = np.zeros((FRAME_HEIGHT // 2, FRAME_WIDTH // 2), dtype=np.uint8)
 
-        # Match dimensions to Y
-        u_up = u_up[:FRAME_HEIGHT, :FRAME_WIDTH]
-        v_up = v_up[:FRAME_HEIGHT, :FRAME_WIDTH]
+            u[:] = uv[:, :, 0]
+            v[:] = uv[:, :, 1]
 
-        # Convert YUV to RGB (BT.601)
-        y_f = y.astype(np.float32)
-        u_f = u_up.astype(np.float32) - 128.0
-        v_f = v_up.astype(np.float32) - 128.0
+            u_resized = np.repeat(np.repeat(u, 2, axis=0), 2, axis=1)
+            v_resized = np.repeat(np.repeat(v, 2, axis=0), 2, axis=1)
 
-        r = y_f + 1.402 * v_f
-        g = y_f - 0.344136 * u_f - 0.714136 * v_f
-        b = y_f + 1.772 * u_f
+        except Exception as e:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: UV plane extraction failed with {e}")
+            return None
+        try:
+            cloudlog.error("[ASSISTANT] decode_nv12_to_jpeg: converting YUV to RGB")
 
-        rgb = np.stack((r, g, b), axis=-1)
-        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+            y_float = y.astype(np.float32)
+            u_float = u_resized.astype(np.float32) - 128
+            v_float = v_resized.astype(np.float32) - 128
 
-        img = Image.fromarray(rgb, mode="RGB")
-        buf = BytesIO()
-        img.save(buf, format="JPEG")
-        jpeg_data = buf.getvalue()
+            r = y_float + 1.402 * v_float
+            g = y_float - 0.344136 * u_float - 0.714136 * v_float
+            b = y_float + 1.772 * u_float
 
-        cloudlog.error(f"[ASSISTANT] Frame encoded to JPEG, size={len(jpeg_data)} bytes")
-        return base64.b64encode(jpeg_data).decode()
+            r = np.clip(r, 0, 255).astype(np.uint8)
+            g = np.clip(g, 0, 255).astype(np.uint8)
+            b = np.clip(b, 0, 255).astype(np.uint8)
+
+            rgb = np.stack([r, g, b], axis=2)
+
+        except Exception as e:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: YUV to RGB conversion failed with {e}")
+            return None
+
+        try:
+            cloudlog.error("[ASSISTANT] decode_nv12_to_jpeg: creating PIL image and encoding to JPEG")
+            img = Image.fromarray(rgb)
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            jpeg_data = base64.b64encode(buf.getvalue()).decode()
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: successfully encoded JPEG ({len(jpeg_data)} characters)")
+            return jpeg_data
+
+        except Exception as e:
+            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: PIL image conversion/saving failed with {e}")
+            return None
+
     except Exception as e:
-        cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg exception: {e}")
+        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: unhandled exception: {e}")
         return None
 
 def send_to_ollama(images_b64, user_prompt):
