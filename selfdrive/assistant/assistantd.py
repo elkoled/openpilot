@@ -5,6 +5,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 import numpy as np
+import threading
 
 from msgq.visionipc import VisionIpcClient, VisionStreamType
 from openpilot.common.realtime import config_realtime_process
@@ -22,16 +23,17 @@ OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
 MODEL_NAME = "gemma3"
 FRAME_WIDTH = 1928
 #FRAME_HEIGHT = 1662 # SIM resolution: 1208, Comma3x resolution: 1662
-FRAMES_PER_SEC = 1        # Capture rate
+FRAMES_PER_SEC = 0.5        # Capture rate
 BUFFER_SIZE = 5           # How many frames to collect before sending
 PROMPT_SYSTEM = (
-    "You are a real-time driving assistant. Your goal is to help the driver stay safe, alert, and informed "
-    "while driving. You receive a short sequence of dashcam images and live vehicle telemetry. "
-    "Generate exactly one spoken sentence that is clear, useful, and timely. "
-    "Prioritize important road information such as: speed limit signs, traffic signs, pedestrians, "
-    "traffic lights, vehicle distance, obstacles, and hazards. "
-    "Avoid summarizing or describing — speak directly as if you're giving driving instructions. "
-    "The sentence should be what the driver hears in the moment, not a report or explanation."
+    "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
+    "Your goal is to describe surroundings in one clear, spoken sentence. "
+    "Focus on things like nearby cars (make, model, color), pedestrians, cyclists, animals, nature, weather, and road signs. "
+    "Try to read and include the actual text on visible traffic signs, city limit signs, and billboards when possible. "
+    "Mention anything unusual, surprising, or worth noticing. "
+    "Speak naturally, as if you're narrating the drive to the person behind the wheel."
+    "Do not mention if there are NO pedestrians, signs or similar."
+    "Tell the driver what to do and what to look at in one single sentence."
 )
 # ========================
 
@@ -83,14 +85,14 @@ def build_prompt_user(buffer_size, fps):
   )
 
   return (
-    f"The following {buffer_size} dashcam frames were captured at a rate of {fps} frames per second, "
-    f"representing the last {int(buffer_size / fps)} seconds of driving. "
-    "You are a real-time co-pilot and assistant, helping the driver with concise spoken messages. "
-    "Focus **especially** on visible speed limit signs, street signs, curves, pedestrians, traffic lights, and any potential hazards. "
-    "Give safety-relevant and regulation-relevant messages first. Avoid repetition. "
-    + additional_info +
-    "Generate exactly one spoken sentence based only on the telemetry and what you see. Do not add explanations."
+    f"The following {buffer_size} dashcam frames were captured at {fps} frames per second, "
+    f"showing the vehicle's recent surroundings. "
+    "Describe the most visually interesting and relevant details in a single spoken sentence. "
+    "Focus on nearby cars (make, model, color), pedestrians, cyclists, animals, special scenery, and especially road signs or billboards — read the actual text if visible. "
+    "Imagine you are a real-time co-driver, pointing out what stands out during the drive. "
+    + additional_info
   )
+
 
 def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
     try:
@@ -229,17 +231,35 @@ def play_tts_audio(text):
 
 def assistantd():
     config_realtime_process([0, 1, 2, 3], priority=5)
-    vision_client  = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
-    while not vision_client .connect(False):
+    vision_client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
+    while not vision_client.connect(False):
         time.sleep(0.1)
 
     last_result = ""
     frame_buffer = []
     last_capture_time = 0
     capture_interval = 1.0 / FRAMES_PER_SEC
-    waiting_for_response = False
-    response_start_time = None
-    response_timeout_sec = 20  # maximum time to wait for model
+    processing_thread = None
+
+    def process_frames(buffer_snapshot):
+        nonlocal last_result
+        try:
+            user_prompt = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
+            cloudlog.info(f"[ASSISTANT] Processing {len(buffer_snapshot)} frames")
+            cloudlog.error(user_prompt)
+            if LLM_BACKEND == "ollama":
+                result = send_to_ollama(buffer_snapshot, user_prompt)
+            elif LLM_BACKEND == "openai":
+                result = send_to_openai(buffer_snapshot, user_prompt)
+            else:
+                raise ValueError(f"[ASSISTANT] Unknown LLM_BACKEND: {LLM_BACKEND}")
+
+            if result and result != last_result:
+                cloudlog.error(f"[ASSISTANT] {result}")
+                play_tts_audio(result)
+                last_result = result
+        except Exception as e:
+            cloudlog.exception("[ASSISTANT] process_frames failed")
 
     while True:
         buf = vision_client.recv()
@@ -248,15 +268,7 @@ def assistantd():
             continue
 
         now = time.monotonic()
-
-        # If we're waiting too long for a response, reset
-        if waiting_for_response and now - response_start_time > response_timeout_sec:
-            cloudlog.error("[ASSISTANT] Model response timeout — skipping")
-            waiting_for_response = False
-            frame_buffer.clear()
-
-        # Only collect frames if not waiting
-        if not waiting_for_response and now - last_capture_time >= capture_interval:
+        if now - last_capture_time >= capture_interval:
             last_capture_time = now
             buf_data = bytes(buf.data)
             stride = buf.stride
@@ -264,37 +276,18 @@ def assistantd():
             if not encoded:
                 cloudlog.error("[ASSISTANT] Frame encoding failed — skipping")
                 continue
+
             frame_buffer.append(encoded)
+            if len(frame_buffer) > BUFFER_SIZE:
+                frame_buffer.pop(0)
 
-        if not waiting_for_response and len(frame_buffer) >= BUFFER_SIZE:
-            if len(frame_buffer) < BUFFER_SIZE:
-                cloudlog.error("[ASSISTANT] Not enough frames collected")
-                continue
+        if processing_thread is None or not processing_thread.is_alive():
+            if len(frame_buffer) == BUFFER_SIZE:
+                buffer_snapshot = list(frame_buffer)
+                processing_thread = threading.Thread(target=process_frames, args=(buffer_snapshot,))
+                processing_thread.start()
 
-            response_start_time = now
-            waiting_for_response = True
-            try:
-                cloudlog.info(f"[ASSISTANT] Captured {len(frame_buffer)} frames, starting model inference")
-                user_prompt = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
-                cloudlog.error(user_prompt)
-                if LLM_BACKEND == "ollama":
-                    result = send_to_ollama(frame_buffer, user_prompt)
-                elif LLM_BACKEND == "openai":
-                    result = send_to_openai(frame_buffer, user_prompt)
-                else:
-                    raise ValueError(f"[ASSISTANT] Unknown LLM_BACKEND: {LLM_BACKEND}")
-
-                if result and result != last_result:
-                    cloudlog.error(f"[ASSISTANT] {result}")
-                    play_tts_audio(result)
-                    last_result = result
-            except Exception as e:
-                cloudlog.exception("[ASSISTANT] send_to_model failed")
-            finally:
-                waiting_for_response = False
-                frame_buffer.clear()
-
-        time.sleep(0.05)
+        time.sleep(0.01)
 
 def main():
     assistantd()
