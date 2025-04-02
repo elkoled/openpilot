@@ -184,6 +184,16 @@ def send_to_openai(images_b64, user_prompt):
         # Combine system prompt with user prompt in the first message
         full_prompt = f"{PROMPT_SYSTEM}\n\n{user_prompt}"
 
+        # Save images to debug folder
+        debug_folder = Path("/tmp/assistant_images")
+        debug_folder.mkdir(parents=True, exist_ok=True)
+        for idx, img_b64 in enumerate(images_b64):
+            img_data = base64.b64decode(img_b64)
+            img_path = debug_folder / f"frame_{idx:02}.jpg"
+            with open(img_path, "wb") as f:
+                f.write(img_data)
+            cloudlog.error(f"[ASSISTANT] Saved debug image to {img_path}")
+
         input_content = [
             {"type": "input_text", "text": full_prompt}
         ] + [
