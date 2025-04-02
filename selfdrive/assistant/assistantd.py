@@ -140,7 +140,7 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
 
         img = Image.fromarray(rgb)
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=85)
+        img.save(buf, format="JPEG", quality=50)
         cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: successfully encoded JPEG ({len(buf.getvalue())} bytes)")
         return base64.b64encode(buf.getvalue()).decode()
 
@@ -183,7 +183,7 @@ def send_to_openai(images_b64, user_prompt):
             {
                 "type": "input_image",
                 "image_url": f"data:image/jpeg;base64,{img}",
-                "detail": "high"
+                "detail": "low"
             }
             for img in images_b64
         ]
@@ -191,7 +191,7 @@ def send_to_openai(images_b64, user_prompt):
         cloudlog.error(f"[ASSISTANT] Sending {len(images_b64)} images using OpenAI responses API")
 
         response = openai_client.responses.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             input=[
                 {
                     "role": "user",
