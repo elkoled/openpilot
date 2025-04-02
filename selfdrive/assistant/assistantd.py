@@ -96,20 +96,50 @@ def decode_nv12_to_jpeg(nv12_bytes):
     try:
         y_size = FRAME_WIDTH * FRAME_HEIGHT
         uv_size = y_size // 2
-        if len(nv12_bytes) != y_size + uv_size:
+        expected_size = y_size + uv_size
+
+        actual_size = len(nv12_bytes)
+        if actual_size != expected_size:
+            cloudlog.error(f"[ASSISTANT] NV12 buffer size mismatch: expected={expected_size}, got={actual_size}")
             return None
 
-        y = np.frombuffer(nv12_bytes[:y_size], dtype=np.uint8).reshape((FRAME_HEIGHT, FRAME_WIDTH))
+        # Separate Y and UV data
+        y = np.frombuffer(nv12_bytes[0:y_size], dtype=np.uint8).reshape((FRAME_HEIGHT, FRAME_WIDTH))
         uv = np.frombuffer(nv12_bytes[y_size:], dtype=np.uint8).reshape((FRAME_HEIGHT // 2, FRAME_WIDTH))
-        nv12 = np.vstack((y, uv))
 
-        # Convert NV12 to RGB using PIL
-        img = Image.fromarray(nv12, mode="L").convert("RGB")
+        # Split interleaved UV into U and V
+        u = uv[:, 0::2]
+        v = uv[:, 1::2]
+
+        # Upsample U and V to full size using nearest-neighbor
+        u_up = np.repeat(np.repeat(u, 2, axis=1), 2, axis=0)
+        v_up = np.repeat(np.repeat(v, 2, axis=1), 2, axis=0)
+
+        # Match dimensions to Y
+        u_up = u_up[:FRAME_HEIGHT, :FRAME_WIDTH]
+        v_up = v_up[:FRAME_HEIGHT, :FRAME_WIDTH]
+
+        # Convert YUV to RGB (BT.601)
+        y_f = y.astype(np.float32)
+        u_f = u_up.astype(np.float32) - 128.0
+        v_f = v_up.astype(np.float32) - 128.0
+
+        r = y_f + 1.402 * v_f
+        g = y_f - 0.344136 * u_f - 0.714136 * v_f
+        b = y_f + 1.772 * u_f
+
+        rgb = np.stack((r, g, b), axis=-1)
+        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+
+        img = Image.fromarray(rgb, mode="RGB")
         buf = BytesIO()
         img.save(buf, format="JPEG")
-        return base64.b64encode(buf.getvalue()).decode()
+        jpeg_data = buf.getvalue()
+
+        cloudlog.error(f"[ASSISTANT] Frame encoded to JPEG, size={len(jpeg_data)} bytes")
+        return base64.b64encode(jpeg_data).decode()
     except Exception as e:
-        cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
+        cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg exception: {e}")
         return None
 
 def send_to_ollama(images_b64, user_prompt):
@@ -142,7 +172,7 @@ def send_to_openai(images_b64, user_prompt):
             for img in images_b64
         ]
 
-        cloudlog.warning(f"[ASSISTANT] Sending {len(images_b64)} images using OpenAI responses API")
+        cloudlog.error(f"[ASSISTANT] Sending {len(images_b64)} images using OpenAI responses API")
 
         response = openai_client.responses.create(
             model="gpt-4o",
@@ -205,7 +235,7 @@ def assistantd():
 
         # If we're waiting too long for a response, reset
         if waiting_for_response and now - response_start_time > response_timeout_sec:
-            cloudlog.warning("[ASSISTANT] Model response timeout — skipping")
+            cloudlog.error("[ASSISTANT] Model response timeout — skipping")
             waiting_for_response = False
             frame_buffer.clear()
 
@@ -214,13 +244,13 @@ def assistantd():
             last_capture_time = now
             encoded = decode_nv12_to_jpeg(bytes(buf.data))
             if not encoded:
-                cloudlog.warning("[ASSISTANT] Frame encoding failed — skipping")
+                cloudlog.error("[ASSISTANT] Frame encoding failed — skipping")
                 continue
             frame_buffer.append(encoded)
 
         if not waiting_for_response and len(frame_buffer) >= BUFFER_SIZE:
             if len(frame_buffer) < BUFFER_SIZE:
-                cloudlog.warning("[ASSISTANT] Not enough frames collected")
+                cloudlog.error("[ASSISTANT] Not enough frames collected")
                 continue
 
             response_start_time = now
@@ -228,7 +258,7 @@ def assistantd():
             try:
                 cloudlog.info(f"[ASSISTANT] Captured {len(frame_buffer)} frames, starting model inference")
                 user_prompt = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
-                cloudlog.warning(user_prompt)
+                cloudlog.error(user_prompt)
                 if LLM_BACKEND == "ollama":
                     result = send_to_ollama(frame_buffer, user_prompt)
                 elif LLM_BACKEND == "openai":
@@ -237,7 +267,7 @@ def assistantd():
                     raise ValueError(f"[ASSISTANT] Unknown LLM_BACKEND: {LLM_BACKEND}")
 
                 if result and result != last_result:
-                    cloudlog.warning(f"[ASSISTANT] {result}")
+                    cloudlog.error(f"[ASSISTANT] {result}")
                     play_tts_audio(result)
                     last_result = result
             except Exception as e:
