@@ -21,8 +21,8 @@ LLM_BACKEND = "openai"  # Options: "ollama", "openai"
 OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
 MODEL_NAME = "gemma3"
 FRAME_WIDTH = 1928
-FRAME_HEIGHT = 1662 # SIM resolution: 1208, Comma3x resolution: 1662
-FRAMES_PER_SEC = 0.5        # Capture rate
+#FRAME_HEIGHT = 1662 # SIM resolution: 1208, Comma3x resolution: 1662
+FRAMES_PER_SEC = 1        # Capture rate
 BUFFER_SIZE = 5           # How many frames to collect before sending
 PROMPT_SYSTEM = (
     "You are a real-time driving assistant. Your goal is to help the driver stay safe, alert, and informed "
@@ -92,77 +92,60 @@ def build_prompt_user(buffer_size, fps):
     "Generate exactly one spoken sentence based only on the telemetry and what you see. Do not add explanations."
   )
 
-def decode_nv12_to_jpeg(nv12_bytes):
+def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
     try:
-        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: starting with buffer size {len(nv12_bytes)} bytes")
+        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: stride={stride_y}, width={width}, height={height}, buffer={len(nv12_bytes)}")
 
-        y_size = FRAME_WIDTH * FRAME_HEIGHT
-        uv_size = y_size // 2
-        expected_size = y_size + uv_size
+        y_size = stride_y * height
+        y = np.frombuffer(nv12_bytes[:y_size], dtype=np.uint8).reshape((height, stride_y))[:, :width]
 
-        if len(nv12_bytes) != expected_size:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: invalid buffer size - got {len(nv12_bytes)}, expected {expected_size}")
+        uv_bytes = nv12_bytes[y_size:]
+        uv_height = height // 2
+        uv_stride = stride_y  # NV12 UV stride == Y stride
+        expected_uv_size = uv_height * uv_stride
+
+        if len(uv_bytes) < expected_uv_size:
+            cloudlog.error(f"[ASSISTANT] UV data too short: got {len(uv_bytes)}, expected {expected_uv_size}")
             return None
+        if len(uv_bytes) > expected_uv_size:
+            cloudlog.error(f"[ASSISTANT] Trimming padded UV: got {len(uv_bytes)}, expected {expected_uv_size}")
+            uv_bytes = uv_bytes[:expected_uv_size]
 
-        try:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: extracting Y plane ({y_size} bytes)")
-            y = np.frombuffer(nv12_bytes[:y_size], dtype=np.uint8).reshape((FRAME_HEIGHT, FRAME_WIDTH))
-        except Exception as e:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: Y plane extraction failed with {e}")
-            return None
+        uv = np.frombuffer(uv_bytes, dtype=np.uint8).reshape((uv_height, uv_stride))
+        u = uv[:, 0::2][:, :width // 2]
+        v = uv[:, 1::2][:, :width // 2]
 
-        try:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: extracting UV plane ({uv_size} bytes)")
-            uv = np.frombuffer(nv12_bytes[y_size:], dtype=np.uint8).reshape((FRAME_HEIGHT // 2, FRAME_WIDTH // 2, 2))
+        u_up = np.repeat(np.repeat(u, 2, axis=0), 2, axis=1)
+        v_up = np.repeat(np.repeat(v, 2, axis=0), 2, axis=1)
 
-            u = np.zeros((FRAME_HEIGHT // 2, FRAME_WIDTH // 2), dtype=np.uint8)
-            v = np.zeros((FRAME_HEIGHT // 2, FRAME_WIDTH // 2), dtype=np.uint8)
+        min_h = min(y.shape[0], u_up.shape[0])
+        crop_offset = 16  # number of top rows to crop due to green lines
+        y = y[crop_offset:min_h, :]
+        u_up = u_up[crop_offset:min_h, :]
+        v_up = v_up[crop_offset:min_h, :]
 
-            u[:] = uv[:, :, 0]
-            v[:] = uv[:, :, 1]
+        y_f = y.astype(np.float32)
+        u_f = u_up.astype(np.float32) - 128
+        v_f = v_up.astype(np.float32) - 128
 
-            u_resized = np.repeat(np.repeat(u, 2, axis=0), 2, axis=1)
-            v_resized = np.repeat(np.repeat(v, 2, axis=0), 2, axis=1)
+        r = y_f + 1.402 * v_f
+        g = y_f - 0.344136 * u_f - 0.714136 * v_f
+        b = y_f + 1.772 * u_f
 
-        except Exception as e:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: UV plane extraction failed with {e}")
-            return None
-        try:
-            cloudlog.error("[ASSISTANT] decode_nv12_to_jpeg: converting YUV to RGB")
+        rgb = np.stack([
+            np.clip(r, 0, 255).astype(np.uint8),
+            np.clip(g, 0, 255).astype(np.uint8),
+            np.clip(b, 0, 255).astype(np.uint8),
+        ], axis=2)
 
-            y_float = y.astype(np.float32)
-            u_float = u_resized.astype(np.float32) - 128
-            v_float = v_resized.astype(np.float32) - 128
-
-            r = y_float + 1.402 * v_float
-            g = y_float - 0.344136 * u_float - 0.714136 * v_float
-            b = y_float + 1.772 * u_float
-
-            r = np.clip(r, 0, 255).astype(np.uint8)
-            g = np.clip(g, 0, 255).astype(np.uint8)
-            b = np.clip(b, 0, 255).astype(np.uint8)
-
-            rgb = np.stack([r, g, b], axis=2)
-
-        except Exception as e:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: YUV to RGB conversion failed with {e}")
-            return None
-
-        try:
-            cloudlog.error("[ASSISTANT] decode_nv12_to_jpeg: creating PIL image and encoding to JPEG")
-            img = Image.fromarray(rgb)
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=85)
-            jpeg_data = base64.b64encode(buf.getvalue()).decode()
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: successfully encoded JPEG ({len(jpeg_data)} characters)")
-            return jpeg_data
-
-        except Exception as e:
-            cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: PIL image conversion/saving failed with {e}")
-            return None
+        img = Image.fromarray(rgb)
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: successfully encoded JPEG ({len(buf.getvalue())} bytes)")
+        return base64.b64encode(buf.getvalue()).decode()
 
     except Exception as e:
-        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: unhandled exception: {e}")
+        cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
         return None
 
 def send_to_ollama(images_b64, user_prompt):
@@ -275,7 +258,9 @@ def assistantd():
         # Only collect frames if not waiting
         if not waiting_for_response and now - last_capture_time >= capture_interval:
             last_capture_time = now
-            encoded = decode_nv12_to_jpeg(bytes(buf.data))
+            buf_data = bytes(buf.data)
+            stride = buf.stride
+            encoded = decode_nv12_to_jpeg(buf_data, stride, FRAME_WIDTH, buf.height)
             if not encoded:
                 cloudlog.error("[ASSISTANT] Frame encoding failed — skipping")
                 continue
