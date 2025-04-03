@@ -6,21 +6,29 @@ from io import BytesIO
 from PIL import Image
 import numpy as np
 import threading
+import requests
 
 from msgq.visionipc import VisionIpcClient, VisionStreamType
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openai import OpenAI
+from ollama import chat
 from pathlib import Path
 from pydub import AudioSegment
 import cereal.messaging as messaging
 
 # ==== CONFIGURATION ====
-OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
+LLM_HOST = "http://ollama.pixeldrift.win:11434"
+TTS_HOST = "http://tts.pixeldrift.win"
 FRAME_WIDTH = 1928
 FRAMES_PER_SEC = 1          # Capture rate
 BUFFER_SIZE = 1             # How many frames to collect before sending
 REQUEST_TIMEOUT = 5        # Timeout for LLM requests in seconds
+USE_LOCAL_LLM = False
+USE_LOCAL_TTS = False
+LOCAL_LLM_MODEL = 'gemma3'
+
+os.environ["OLLAMA_HOST"] = LLM_HOST
 
 PROMPT_SYSTEM = (
     "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
@@ -34,7 +42,6 @@ PROMPT_SYSTEM = (
 )
 # ========================
 
-os.environ["OLLAMA_HOST"] = OLLAMA_HOST
 
 def get_vehicle_telemetry():
     """Get current vehicle telemetry data"""
@@ -122,7 +129,7 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
         cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
         return None
 
-def send_to_openai(images_b64, user_prompt):
+def llm_openai(images_b64, user_prompt):
     """Send images to OpenAI"""
     try:
         client = OpenAI(max_retries=0)
@@ -154,28 +161,59 @@ def send_to_openai(images_b64, user_prompt):
         cloudlog.error(f"[ASSISTANT] OpenAI request failed: {e}")
         return None
 
-def play_tts_audio(text):
-    """Generate and play TTS audio"""
+def llm_local(images_b64, user_prompt):
+    try:
+        image_bytes_list = [base64.b64decode(b64) for b64 in images_b64]
+
+        response = chat(
+            model=LOCAL_LLM_MODEL,
+            messages=[
+                {
+                    'role': 'user',
+                    'content': user_prompt,
+                    'images': image_bytes_list,
+                }
+            ]
+        )
+        return response['message']['content'].strip()
+    except Exception as e:
+        cloudlog.error(f"[ASSISTANT] Local LLM (Ollama chat) failed: {e}")
+        return None
+
+def tts_openai(text):
     try:
         client = OpenAI()
-        temp_mp3 = Path("/tmp/tts.mp3")
-        final_wav = Path("/tmp/play.wav")
-
         with client.audio.speech.with_streaming_response.create(
             model="gpt-4o-mini-tts",
             voice="alloy",
             input=text,
             response_format="mp3"
         ) as response:
-            response.stream_to_file(temp_mp3)
-
-        # Resample to 48kHz mono WAV
-        audio = AudioSegment.from_file(temp_mp3)
-        audio = audio.set_frame_rate(48000).set_channels(1).set_sample_width(2)
-        audio.export(final_wav, format="wav")
-        cloudlog.error(f"[ASSISTANT] TTS ready: {text}")
+            mp3_bytes = response.read()
+        save_audio(mp3_bytes, is_mp3=True)
+        cloudlog.error(f"[ASSISTANT] OpenAI TTS ready: {text}")
     except Exception as e:
         cloudlog.error(f"[ASSISTANT] TTS failed: {e}")
+
+# TODO: verify with local TTS
+def tts_local(text):
+    try:
+        r = requests.post(f"{TTS_HOST}/api/tts", json={"text": text})
+        r.raise_for_status()
+        save_audio(r.content, is_mp3=False)
+        cloudlog.error(f"[ASSISTANT] Local TTS ready: {text}")
+    except Exception as e:
+        cloudlog.error(f"[ASSISTANT] Local TTS failed: {e}")
+
+
+def save_audio(audio_bytes, is_mp3=True, output_path=Path("/tmp/play.wav")):
+    try:
+        audio = AudioSegment.from_file(BytesIO(audio_bytes), format="mp3" if is_mp3 else "wav")
+        audio = audio.set_frame_rate(48000).set_channels(1).set_sample_width(2)
+        audio.export(output_path, format="wav")
+        cloudlog.error("[ASSISTANT] Audio saved to WAV.")
+    except Exception as e:
+        cloudlog.error(f"[ASSISTANT] Audio conversion failed: {e}")
 
 def main():
     """Main service loop"""
@@ -197,15 +235,20 @@ def main():
     def process_frames(buffer_snapshot):
         nonlocal processing, last_result
         try:
-            user_prompt = build_prompt()
             cloudlog.error(f"[ASSISTANT] Processing {len(buffer_snapshot)} frames")
 
-            result = send_to_openai(buffer_snapshot, user_prompt)
+            user_prompt = build_prompt()
+            llm_func = llm_local if USE_LOCAL_LLM else llm_openai
+            result = llm_func(buffer_snapshot, user_prompt)
 
-            if result and result != last_result:
-                cloudlog.error(f"[ASSISTANT] Result: {result}")
-                play_tts_audio(result)
-                last_result = result
+            if not result:
+                return
+            if result == last_result:
+                return  # skip duplicate
+            cloudlog.error(f"[ASSISTANT] Result: {result}")
+            tts_func = tts_local if USE_LOCAL_TTS else tts_openai
+            tts_func(result)
+            last_result = result
         except Exception as e:
             cloudlog.error(f"[ASSISTANT] Processing error: {e}")
         finally:
