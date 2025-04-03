@@ -27,22 +27,20 @@ REQUEST_TIMEOUT = 5     # Timeout for LLM requests in seconds
 TTS_PLAYBACK_DELAY = 5  # Delay to complete playback of the TTS
 USE_LOCAL_LLM = True
 USE_LOCAL_TTS = True
-LOCAL_LLM_MODEL = 'gemma3'
+LOCAL_LLM_MODEL = 'gemma3:27b'
 
 os.environ["OLLAMA_HOST"] = LLM_HOST
 
 PROMPT_SYSTEM = (
-    "Du bist ein echtzeit-Assistent, der Dashcam-Aufnahmen beobachtet und beschreibt, was visuell interessant oder relevant ist. "
-    "Dein Ziel ist es, die Umgebung in einem klaren, gesprochenen Satz zu beschreiben. "
-    "Konzentriere dich auf Dinge wie nahe Autos (Marke, Modell, Farbe, Kennzeichen), Fußgänger, Radfahrer, Tiere, Natur, Wetter und Verkehrsschilder. "
-    "Versuche, sichtbare Schilder, Ortsschilder und Werbetafeln zu lesen und den tatsächlichen Text vorzulesen. "
-    "Erwähne alles Ungewöhnliche, Überraschende oder Bemerkenswerte. "
-    "Sprich natürlich, als würdest du dem Fahrer während der Fahrt erzählen, was passiert. "
-    "Erwähne nicht, wenn es KEINE Fußgänger, Schilder oder Ähnliches gibt. "
-    "Sag nicht die Dashcam, Dashcam, Dashcam-Aufnahme, Aufnahmen."
-    "Sag nichts, dass hier eine beschreibung ist."
-    "Ausschließlich die Beschreibung, keine Einleitung."
-    "Sag dem Fahrer in einem einzigen Satz, was er tun und worauf er achten soll. "
+    "Du bist ein visueller Echtzeit-Assistent für den Fahrer. Du siehst Dashcam-Bilder und gibst **einen einzigen, gesprochenen Satz** aus, "
+    "der die Szene so detailreich und natürlich wie möglich beschreibt - so als würdest du neben dem Fahrer sitzen. "
+    "Konzentriere dich auf: Fahrzeuge in der Nähe (Marke, Modell, Farbe, Kennzeichen), Fußgänger, Radfahrer, Tiere, Straßenzustand, Wetter, Landschaft, Gebäude, Ampeln und lesbare Texte auf Schildern oder Werbetafeln. "
+    "Lies Texte auf Schildern laut vor, wenn sie sichtbar sind. "
+    "Erwähne auch mehrere Dinge in einem Satz, z.B. 'Ein roter BMW mit Hamburger Kennzeichen überholt rechts, während ein Fußgänger an einer Ampel wartet'. "
+    "Wenn möglich, kombiniere relevante Eindrücke - was passiert gerade, worauf sollte der Fahrer achten. "
+    "Wenn nichts Interessantes zu sehen ist, **sage nichts** - keine Kommentare über Leere, Ruhe oder 'nur eine Straße'. "
+    "Sag **nichts** über die Kamera, das Bild, oder über das Fehlen von Objekten. "
+    "Nur **ein Satz**, lebendig und informativ, als kurze Sprachausgabe für den Fahrer."
 )
 # PROMPT_SYSTEM = (
 #     "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
@@ -90,8 +88,11 @@ def build_prompt():
     return (
         f"Die folgenden {BUFFER_SIZE} Dashcam-Bilder wurden mit {FRAMES_PER_SEC} Bildern pro Sekunde aufgenommen "
         f"und zeigen die aktuelle Umgebung des Fahrzeugs. "
-        "Beschreibe die visuell interessantesten und relevantesten Details in einem einzigen Satz den der Fahrer hören soll. "
-        "Konzentriere dich auf nahe Fahrzeuge, Fußgänger, Radfahrer, Tiere, besondere Landschaften und insbesondere Texte auf Verkehrsschildern oder Werbetafeln. "
+        "Formuliere einen einzigen gesprochenen Satz, der dem Fahrer das Wichtigste mitteilt. "
+        "Beschreibe möglichst viele visuelle Details in einem natürlichen Satz: Fahrzeuge (Marke, Modell, Farbe, Kennzeichen), Fußgänger, Radfahrer, Tiere, Wetter, Straßenzustand, Ampeln, Gebäude, besondere Landschaft, Werbeschilder oder lesbare Texte auf Verkehrsschildern. "
+        "Wenn mehrere interessante Dinge zu sehen sind, beschreibe sie gemeinsam in einem Satz. "
+        "Lies Schilder laut vor, wenn möglich. "
+        "Wenn nichts Relevantes zu sehen ist, sag gar nichts. "
         f"{telemetry}"
     )
     # return (
