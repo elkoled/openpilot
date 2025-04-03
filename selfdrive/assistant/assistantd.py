@@ -10,21 +10,18 @@ import threading
 from msgq.visionipc import VisionIpcClient, VisionStreamType
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
-from ollama import chat
 from openai import OpenAI
 from pathlib import Path
 from pydub import AudioSegment
 import cereal.messaging as messaging
 
 # ==== CONFIGURATION ====
-LLM_BACKEND = "openai"  # Options: "ollama", "openai"
-# OPENAI_API_KEY = ""
 OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
-MODEL_NAME = "gemma3"
 FRAME_WIDTH = 1928
-#FRAME_HEIGHT = 1662 # SIM resolution: 1208, Comma3x resolution: 1662
 FRAMES_PER_SEC = 0.5        # Capture rate
-BUFFER_SIZE = 5           # How many frames to collect before sending
+BUFFER_SIZE = 5             # How many frames to collect before sending
+REQUEST_TIMEOUT = 15        # Timeout for LLM requests in seconds
+
 PROMPT_SYSTEM = (
     "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
     "Your goal is to describe surroundings in one clear, spoken sentence. "
@@ -38,81 +35,56 @@ PROMPT_SYSTEM = (
 # ========================
 
 os.environ["OLLAMA_HOST"] = OLLAMA_HOST
-# os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 
-openai_client = OpenAI()
+def get_vehicle_telemetry():
+    """Get current vehicle telemetry data"""
+    sm = messaging.SubMaster(['carState'])
+    start = time.monotonic()
+    while not sm.updated['carState']:
+        sm.update(100)
+        if time.monotonic() - start > 1.0:
+            return "Vehicle telemetry not available yet. Use visual cues only."
 
-def build_prompt_user(buffer_size, fps):
-  sm = messaging.SubMaster(['carState'])
-  start = time.monotonic()
-  while not sm.updated['carState']:
-    sm.update(100)
-    if time.monotonic() - start > 1.0:
-        return "Vehicle telemetry not available yet. Use visual cues only."
+    cs = sm['carState']
+    speed_kph = round(cs.vEgoCluster * 3.6) if cs.vEgoCluster is not None else 0
+    acceleration = round(cs.aEgo, 2) if cs.aEgo is not None else 0
+    steering_angle = round(cs.steeringAngleDeg, 1)
+    cruise_enabled = cs.cruiseState.enabled
+    cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed is not None else 0
+    standstill = cs.standstill
 
-  cs = sm['carState']
+    motion_state = "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h"
+    cruise_info = f"Cruise control active at {cruise_speed} km/h. " if cruise_enabled else ""
 
-  # Fallbacks
-  speed_kph = round(cs.vEgoCluster * 3.6) if cs.vEgoCluster is not None else 0
-  acceleration = round(cs.aEgo, 2) if cs.aEgo is not None else 0
-  steering_angle = round(cs.steeringAngleDeg, 1)
-  steering_torque = round(cs.steeringTorque, 2)
-  steering_rate = round(cs.steeringRateDeg, 2)
-  yaw_rate = round(cs.yawRate, 2)
-  cruise_enabled = cs.cruiseState.enabled
-  cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed is not None else 0
-  cruise_standstill = cs.cruiseState.standstill
-  gas_pct = round(cs.gas * 100) if cs.gas is not None else 0
-  brake_hold = cs.brakeHoldActive
-  esp_disabled = cs.espDisabled
-  steering_override = cs.steeringPressed
-  standstill = cs.standstill
+    return f"{motion_state}, acceleration: {acceleration} m/s², steering angle: {steering_angle}°. {cruise_info}"
 
-  wheel_speeds = cs.wheelSpeeds
-  avg_wheel_speed = round((wheel_speeds.fl + wheel_speeds.fr + wheel_speeds.rl + wheel_speeds.rr) / 4 * 3.6, 1)
-
-  motion_state = "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h"
-
-  additional_info = (
-    f"{motion_state} Avg wheel speed: {avg_wheel_speed} km/h, acceleration: {acceleration} m/s², "
-    f"yaw rate: {yaw_rate}°/s, steering angle: {steering_angle}°, rate: {steering_rate}°/s, torque: {steering_torque}, "
-    f"gas: {gas_pct}%. "
-    f"{'Cruise control active at ' + str(cruise_speed) + ' km/h. ' if cruise_enabled else ''}"
-    f"{'Cruise is waiting to resume from standstill. ' if cruise_standstill else ''}"
-    f"{'Brake hold is active. ' if brake_hold else ''}"
-    f"{'Driver is overriding steering. ' if steering_override else ''}"
-    f"{'Warning: Stability control (ESP) is disabled. ' if esp_disabled else ''}"
-  )
-
-  return (
-    f"The following {buffer_size} dashcam frames were captured at {fps} frames per second, "
-    f"showing the vehicle's recent surroundings. "
-    "Describe the most visually interesting and relevant details in a single spoken sentence. "
-    "Focus on nearby cars (make, model, color), pedestrians, cyclists, animals, special scenery, and especially road signs or billboards — read the actual text if visible. "
-    "Imagine you are a real-time co-driver, pointing out what stands out during the drive. "
-    + additional_info
-  )
-
+def build_prompt():
+    """Build the user prompt with vehicle telemetry"""
+    telemetry = get_vehicle_telemetry()
+    return (
+        f"The following {BUFFER_SIZE} dashcam frames were captured at {FRAMES_PER_SEC} frames per second, "
+        f"showing the vehicle's recent surroundings. "
+        "Describe the most visually interesting and relevant details in a single spoken sentence. "
+        "Focus on nearby cars, pedestrians, cyclists, animals, special scenery, and especially road signs or billboards. "
+        f"{telemetry}"
+    )
 
 def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
+    """Convert NV12 format to JPEG"""
     try:
-        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: stride={stride_y}, width={width}, height={height}, buffer={len(nv12_bytes)}")
-
         y_size = stride_y * height
         y = np.frombuffer(nv12_bytes[:y_size], dtype=np.uint8).reshape((height, stride_y))[:, :width]
 
         uv_bytes = nv12_bytes[y_size:]
         uv_height = height // 2
-        uv_stride = stride_y  # NV12 UV stride == Y stride
+        uv_stride = stride_y
         expected_uv_size = uv_height * uv_stride
 
         if len(uv_bytes) < expected_uv_size:
             cloudlog.error(f"[ASSISTANT] UV data too short: got {len(uv_bytes)}, expected {expected_uv_size}")
             return None
-        if len(uv_bytes) > expected_uv_size:
-            cloudlog.error(f"[ASSISTANT] Trimming padded UV: got {len(uv_bytes)}, expected {expected_uv_size}")
-            uv_bytes = uv_bytes[:expected_uv_size]
 
+        uv_bytes = uv_bytes[:expected_uv_size]
         uv = np.frombuffer(uv_bytes, dtype=np.uint8).reshape((uv_height, uv_stride))
         u = uv[:, 0::2][:, :width // 2]
         v = uv[:, 1::2][:, :width // 2]
@@ -121,11 +93,12 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
         v_up = np.repeat(np.repeat(v, 2, axis=0), 2, axis=1)
 
         min_h = min(y.shape[0], u_up.shape[0])
-        crop_offset = 16  # number of top rows to crop due to green lines
+        crop_offset = 16  # crop top rows due to green lines
         y = y[crop_offset:min_h, :]
         u_up = u_up[crop_offset:min_h, :]
         v_up = v_up[crop_offset:min_h, :]
 
+        # Convert to RGB
         y_f = y.astype(np.float32)
         u_f = u_up.astype(np.float32) - 128
         v_f = v_up.astype(np.float32) - 128
@@ -143,41 +116,17 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
         img = Image.fromarray(rgb)
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=50)
-        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: successfully encoded JPEG ({len(buf.getvalue())} bytes)")
         return base64.b64encode(buf.getvalue()).decode()
 
     except Exception as e:
-        cloudlog.exception(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
+        cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
         return None
 
-def send_to_ollama(images_b64, user_prompt):
-    try:
-        response = chat(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": PROMPT_SYSTEM},
-                {"role": "user", "content": user_prompt, "images": images_b64}
-            ]
-        )
-        return response.message.content.strip()
-    except Exception as e:
-        cloudlog.exception(f"[ASSISTANT] send_to_model: {e}")
-        return ""
-
 def send_to_openai(images_b64, user_prompt):
+    """Send images to OpenAI"""
     try:
-        # Combine system prompt with user prompt in the first message
+        client = OpenAI()
         full_prompt = f"{PROMPT_SYSTEM}\n\n{user_prompt}"
-
-        # Save images to debug folder
-        debug_folder = Path("/tmp/assistant_images")
-        debug_folder.mkdir(parents=True, exist_ok=True)
-        for idx, img_b64 in enumerate(images_b64):
-            img_data = base64.b64decode(img_b64)
-            img_path = debug_folder / f"frame_{idx:02}.jpg"
-            with open(img_path, "wb") as f:
-                f.write(img_data)
-            cloudlog.error(f"[ASSISTANT] Saved debug image to {img_path}")
 
         input_content = [
             {"type": "input_text", "text": full_prompt}
@@ -190,9 +139,7 @@ def send_to_openai(images_b64, user_prompt):
             for img in images_b64
         ]
 
-        cloudlog.error(f"[ASSISTANT] Sending {len(images_b64)} images using OpenAI responses API")
-
-        response = openai_client.responses.create(
+        response = client.responses.create(
             model="gpt-4o-mini",
             input=[
                 {
@@ -201,18 +148,19 @@ def send_to_openai(images_b64, user_prompt):
                 }
             ]
         )
-
         return response.output_text.strip()
     except Exception as e:
-        cloudlog.exception(f"[ASSISTANT] send_to_openai: {e}")
-        return ""
+        cloudlog.error(f"[ASSISTANT] OpenAI request failed: {e}")
+        return None
 
 def play_tts_audio(text):
+    """Generate and play TTS audio"""
     try:
+        client = OpenAI()
         temp_mp3 = Path("/tmp/tts.mp3")
         final_wav = Path("/tmp/play.wav")
 
-        with OpenAI().audio.speech.with_streaming_response.create(
+        with client.audio.speech.with_streaming_response.create(
             model="gpt-4o-mini-tts",
             voice="alloy",
             input=text,
@@ -220,77 +168,80 @@ def play_tts_audio(text):
         ) as response:
             response.stream_to_file(temp_mp3)
 
-        # Resample from 24kHz to 48kHz mono WAV using pydub
+        # Resample to 48kHz mono WAV
         audio = AudioSegment.from_file(temp_mp3)
         audio = audio.set_frame_rate(48000).set_channels(1).set_sample_width(2)
         audio.export(final_wav, format="wav")
-
-        print(f"[ASSISTANT] TTS ready at {final_wav}: {text}")
+        cloudlog.error(f"[ASSISTANT] TTS ready: {text}")
     except Exception as e:
-        print(f"[ASSISTANT] play_tts_audio failed: {e}")
+        cloudlog.error(f"[ASSISTANT] TTS failed: {e}")
 
-def assistantd():
+def main():
+    """Main service loop"""
     config_realtime_process([0, 1, 2, 3], priority=5)
     vision_client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
+
+    # Wait for camera connection
     while not vision_client.connect(False):
         time.sleep(0.1)
 
-    last_result = ""
+    cloudlog.error("[ASSISTANT] Connected to camera")
+
     frame_buffer = []
+    last_result = ""
     last_capture_time = 0
     capture_interval = 1.0 / FRAMES_PER_SEC
-    processing_thread = None
+    processing = False
 
     def process_frames(buffer_snapshot):
-        nonlocal last_result
+        nonlocal processing, last_result
         try:
-            user_prompt = build_prompt_user(BUFFER_SIZE, FRAMES_PER_SEC)
-            cloudlog.info(f"[ASSISTANT] Processing {len(buffer_snapshot)} frames")
-            cloudlog.error(user_prompt)
-            if LLM_BACKEND == "ollama":
-                result = send_to_ollama(buffer_snapshot, user_prompt)
-            elif LLM_BACKEND == "openai":
-                result = send_to_openai(buffer_snapshot, user_prompt)
-            else:
-                raise ValueError(f"[ASSISTANT] Unknown LLM_BACKEND: {LLM_BACKEND}")
+            user_prompt = build_prompt()
+            cloudlog.error(f"[ASSISTANT] Processing {len(buffer_snapshot)} frames")
+
+            result = send_to_openai(buffer_snapshot, user_prompt)
 
             if result and result != last_result:
-                cloudlog.error(f"[ASSISTANT] {result}")
+                cloudlog.error(f"[ASSISTANT] Result: {result}")
                 play_tts_audio(result)
                 last_result = result
         except Exception as e:
-            cloudlog.exception("[ASSISTANT] process_frames failed")
+            cloudlog.error(f"[ASSISTANT] Processing error: {e}")
+        finally:
+            processing = False
 
     while True:
-        buf = vision_client.recv()
-        if buf is None:
-            time.sleep(0.05)
-            continue
-
-        now = time.monotonic()
-        if now - last_capture_time >= capture_interval:
-            last_capture_time = now
-            buf_data = bytes(buf.data)
-            stride = buf.stride
-            encoded = decode_nv12_to_jpeg(buf_data, stride, FRAME_WIDTH, buf.height)
-            if not encoded:
-                cloudlog.error("[ASSISTANT] Frame encoding failed — skipping")
+        try:
+            buf = vision_client.recv()
+            if buf is None:
+                time.sleep(0.05)
                 continue
 
-            frame_buffer.append(encoded)
-            if len(frame_buffer) > BUFFER_SIZE:
-                frame_buffer.pop(0)
+            now = time.monotonic()
+            if now - last_capture_time >= capture_interval:
+                last_capture_time = now
 
-        if processing_thread is None or not processing_thread.is_alive():
-            if len(frame_buffer) == BUFFER_SIZE:
+                # Process frame
+                buf_data = bytes(buf.data)
+                encoded = decode_nv12_to_jpeg(buf_data, buf.stride, FRAME_WIDTH, buf.height)
+                if not encoded:
+                    continue
+
+                # Manage buffer
+                frame_buffer.append(encoded)
+                if len(frame_buffer) > BUFFER_SIZE:
+                    frame_buffer.pop(0)
+
+            # Start processing if we have enough frames and not already processing
+            if not processing and len(frame_buffer) == BUFFER_SIZE:
+                processing = True
                 buffer_snapshot = list(frame_buffer)
-                processing_thread = threading.Thread(target=process_frames, args=(buffer_snapshot,))
-                processing_thread.start()
+                threading.Thread(target=process_frames, args=(buffer_snapshot,)).start()
 
-        time.sleep(0.01)
-
-def main():
-    assistantd()
+            time.sleep(0.01)
+        except Exception as e:
+            cloudlog.error(f"[ASSISTANT] Main loop error: {e}")
+            time.sleep(1)  # Prevent tight error loops
 
 if __name__ == "__main__":
     main()
