@@ -18,9 +18,9 @@ import cereal.messaging as messaging
 # ==== CONFIGURATION ====
 OLLAMA_HOST = "http://ollama.pixeldrift.win:11434"
 FRAME_WIDTH = 1928
-FRAMES_PER_SEC = 0.5        # Capture rate
-BUFFER_SIZE = 5             # How many frames to collect before sending
-REQUEST_TIMEOUT = 15        # Timeout for LLM requests in seconds
+FRAMES_PER_SEC = 1          # Capture rate
+BUFFER_SIZE = 1             # How many frames to collect before sending
+REQUEST_TIMEOUT = 5        # Timeout for LLM requests in seconds
 
 PROMPT_SYSTEM = (
     "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
@@ -125,7 +125,7 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
 def send_to_openai(images_b64, user_prompt):
     """Send images to OpenAI"""
     try:
-        client = OpenAI()
+        client = OpenAI(max_retries=0)
         full_prompt = f"{PROMPT_SYSTEM}\n\n{user_prompt}"
 
         input_content = [
@@ -146,7 +146,8 @@ def send_to_openai(images_b64, user_prompt):
                     "role": "user",
                     "content": input_content
                 }
-            ]
+            ],
+            timeout=REQUEST_TIMEOUT
         )
         return response.output_text.strip()
     except Exception as e:
