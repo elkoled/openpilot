@@ -21,25 +21,40 @@ import cereal.messaging as messaging
 LLM_HOST = "http://ollama.pixeldrift.win:11434"
 TTS_HOST = "http://tts.pixeldrift.win"
 FRAME_WIDTH = 1928
-FRAMES_PER_SEC = 1          # Capture rate
-BUFFER_SIZE = 1             # How many frames to collect before sending
-REQUEST_TIMEOUT = 5        # Timeout for LLM requests in seconds
-USE_LOCAL_LLM = False
-USE_LOCAL_TTS = False
+FRAMES_PER_SEC = 1      # Capture rate
+BUFFER_SIZE = 1         # How many frames to collect before sending
+REQUEST_TIMEOUT = 5     # Timeout for LLM requests in seconds
+TTS_PLAYBACK_DELAY = 5  # Delay to complete playback of the TTS
+USE_LOCAL_LLM = True
+USE_LOCAL_TTS = True
 LOCAL_LLM_MODEL = 'gemma3'
 
 os.environ["OLLAMA_HOST"] = LLM_HOST
 
 PROMPT_SYSTEM = (
-    "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
-    "Your goal is to describe surroundings in one clear, spoken sentence. "
-    "Focus on things like nearby cars (make, model, color), pedestrians, cyclists, animals, nature, weather, and road signs. "
-    "Try to read and include the actual text on visible traffic signs, city limit signs, and billboards when possible. "
-    "Mention anything unusual, surprising, or worth noticing. "
-    "Speak naturally, as if you're narrating the drive to the person behind the wheel."
-    "Do not mention if there are NO pedestrians, signs or similar."
-    "Tell the driver what to do and what to look at in one single sentence."
+    "Du bist ein echtzeit-Assistent, der Dashcam-Aufnahmen beobachtet und beschreibt, was visuell interessant oder relevant ist. "
+    "Dein Ziel ist es, die Umgebung in einem klaren, gesprochenen Satz zu beschreiben. "
+    "Konzentriere dich auf Dinge wie nahe Autos (Marke, Modell, Farbe, Kennzeichen), Fußgänger, Radfahrer, Tiere, Natur, Wetter und Verkehrsschilder. "
+    "Versuche, sichtbare Schilder, Ortsschilder und Werbetafeln zu lesen und den tatsächlichen Text vorzulesen. "
+    "Erwähne alles Ungewöhnliche, Überraschende oder Bemerkenswerte. "
+    "Sprich natürlich, als würdest du dem Fahrer während der Fahrt erzählen, was passiert. "
+    "Erwähne nicht, wenn es KEINE Fußgänger, Schilder oder Ähnliches gibt. "
+    "Sag nicht die Dashcam, Dashcam, Dashcam-Aufnahme, Aufnahmen."
+    "Sag nichts, dass hier eine beschreibung ist."
+    "Ausschließlich die Beschreibung, keine Einleitung."
+    "Sag dem Fahrer in einem einzigen Satz, was er tun und worauf er achten soll. "
 )
+# PROMPT_SYSTEM = (
+#     "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
+#     "Your goal is to describe surroundings in one clear, spoken sentence. "
+#     "Focus on things like nearby cars (make, model, color, license plate), pedestrians, cyclists, animals, nature, weather, and road signs. "
+#     "Try to read and include the actual text on visible traffic signs, city limit signs, and billboards when possible. "
+#     "Mention anything unusual, surprising, or worth noticing. "
+#     "Speak naturally, as if you're narrating the drive to the person behind the wheel."
+#     "Do not mention if there are NO pedestrians, signs or similar."
+#     "Tell the driver what to do and what to look at in one single sentence."
+#     "Do not say dashcam, dashcam footage, footage."
+# )
 # ========================
 
 
@@ -60,21 +75,32 @@ def get_vehicle_telemetry():
     cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed is not None else 0
     standstill = cs.standstill
 
-    motion_state = "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h"
-    cruise_info = f"Cruise control active at {cruise_speed} km/h. " if cruise_enabled else ""
+    motion_state = "Das Fahrzeug steht." if standstill else f"Das Fahrzeug fährt mit {speed_kph} km/h."
+    cruise_info = f"Tempomat aktiv bei {cruise_speed} km/h. " if cruise_enabled else ""
 
-    return f"{motion_state}, acceleration: {acceleration} m/s², steering angle: {steering_angle}°. {cruise_info}"
+    return f"{motion_state}, Beschleunigung: {acceleration} m/s², Lenkwinkel: {steering_angle}°. {cruise_info}"
+    # motion_state = "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h"
+    # cruise_info = f"Cruise control active at {cruise_speed} km/h. " if cruise_enabled else ""
+
+    # return f"{motion_state}, acceleration: {acceleration} m/s², steering angle: {steering_angle}°. {cruise_info}"
 
 def build_prompt():
     """Build the user prompt with vehicle telemetry"""
     telemetry = get_vehicle_telemetry()
     return (
-        f"The following {BUFFER_SIZE} dashcam frames were captured at {FRAMES_PER_SEC} frames per second, "
-        f"showing the vehicle's recent surroundings. "
-        "Describe the most visually interesting and relevant details in a single spoken sentence. "
-        "Focus on nearby cars, pedestrians, cyclists, animals, special scenery, and especially road signs or billboards. "
+        f"Die folgenden {BUFFER_SIZE} Dashcam-Bilder wurden mit {FRAMES_PER_SEC} Bildern pro Sekunde aufgenommen "
+        f"und zeigen die aktuelle Umgebung des Fahrzeugs. "
+        "Beschreibe die visuell interessantesten und relevantesten Details in einem einzigen Satz den der Fahrer hören soll. "
+        "Konzentriere dich auf nahe Fahrzeuge, Fußgänger, Radfahrer, Tiere, besondere Landschaften und insbesondere Texte auf Verkehrsschildern oder Werbetafeln. "
         f"{telemetry}"
     )
+    # return (
+    #     f"The following {BUFFER_SIZE} dashcam frames were captured at {FRAMES_PER_SEC} frames per second, "
+    #     f"showing the vehicle's recent surroundings. "
+    #     "Describe the most visually interesting and relevant details in a single spoken sentence. "
+    #     "Focus on nearby cars, pedestrians, cyclists, animals, special scenery, and especially road signs or billboards. "
+    #     f"{telemetry}"
+    # )
 
 def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
     """Convert NV12 format to JPEG"""
@@ -195,13 +221,22 @@ def tts_openai(text):
     except Exception as e:
         cloudlog.error(f"[ASSISTANT] TTS failed: {e}")
 
-# TODO: verify with local TTS
 def tts_local(text):
     try:
-        r = requests.post(f"{TTS_HOST}/api/tts", json={"text": text})
-        r.raise_for_status()
-        save_audio(r.content, is_mp3=False)
-        cloudlog.error(f"[ASSISTANT] Local TTS ready: {text}")
+        response = requests.post(
+            TTS_HOST,
+            headers={"Content-Type": "text/plain"},
+            data=text.encode("utf-8"),
+            timeout=REQUEST_TIMEOUT
+        )
+        response.raise_for_status()
+
+        if not response.content:
+            cloudlog.error("[ASSISTANT] Local TTS: empty response.")
+            return
+
+        save_audio(response.content, is_mp3=False)
+        cloudlog.error(f"[ASSISTANT] TTS done: {text}")
     except Exception as e:
         cloudlog.error(f"[ASSISTANT] Local TTS failed: {e}")
 
@@ -241,14 +276,14 @@ def main():
             llm_func = llm_local if USE_LOCAL_LLM else llm_openai
             result = llm_func(buffer_snapshot, user_prompt)
 
-            if not result:
-                return
-            if result == last_result:
-                return  # skip duplicate
+            if not result or result == last_result:
+                return  # skip empty or duplicate result
             cloudlog.error(f"[ASSISTANT] Result: {result}")
             tts_func = tts_local if USE_LOCAL_TTS else tts_openai
             tts_func(result)
             last_result = result
+            # TODO: find other way
+            time.sleep(TTS_PLAYBACK_DELAY)
         except Exception as e:
             cloudlog.error(f"[ASSISTANT] Processing error: {e}")
         finally:
