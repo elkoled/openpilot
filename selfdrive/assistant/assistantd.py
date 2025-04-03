@@ -18,41 +18,69 @@ from pydub import AudioSegment
 import cereal.messaging as messaging
 
 # ==== CONFIGURATION ====
+# Personality 0: english neutral, 1: english sassy, 2: german neutral, 3: german sassy
+PROMPT = 2
+LANGUAGE = 'de'
+
 LLM_HOST = "http://ollama.pixeldrift.win:11434"
 TTS_HOST = "http://tts.pixeldrift.win"
 FRAME_WIDTH = 1928
 FRAMES_PER_SEC = 1      # Capture rate
 BUFFER_SIZE = 1         # How many frames to collect before sending
 REQUEST_TIMEOUT = 5     # Timeout for LLM requests in seconds
-TTS_PLAYBACK_DELAY = 5  # Delay to complete playback of the TTS
+TTS_PLAYBACK_DELAY = 5  # Delay to wait for completion of TTS playback
 USE_LOCAL_LLM = True
 USE_LOCAL_TTS = True
 LOCAL_LLM_MODEL = 'gemma3:27b'
 
 os.environ["OLLAMA_HOST"] = LLM_HOST
 
-PROMPT_SYSTEM = (
-    "Du bist ein frecher, sarkastischer Assistent mit bissigem Humor, der die Umgebung und das Fahrverhalten kommentiert. "
-    "Du siehst Dashcam-Bilder und gibst eine kurze, spitze Bemerkung ab - direkt, ironisch, nie neutral. "
-    "Sprich in kurzen Sätzen. Kein Erklärstil. Kein Smalltalk. "
-    "Bring regelmäßig Seitenhiebe auf Elektroautos - ironisch, übertrieben, beleidigen. "
-    "**Sag unter keinen Umständen etwas über Tempomat, Beschleunigung, Lenkwinkel oder andere Telemetriedaten.** "
-    "Mach dich über andere Fahrer, Verkehr, Straßenschilder, Schildertexte, Baustellen oder das Wetter lustig. "
-    "Keine Einleitungen. Keine Meta-Kommentare. Kein Bezug auf Bilder oder die Kamera. "
-    "Nur 1-2 Sätze, frech, trocken, sarkastisch - so wie ein grantelnder Beifahrer mit Stil."
-)
-# PROMPT_SYSTEM = (
-#     "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
-#     "Your goal is to describe surroundings in one clear, spoken sentence. "
-#     "Focus on things like nearby cars (make, model, color, license plate), pedestrians, cyclists, animals, nature, weather, and road signs. "
-#     "Try to read and include the actual text on visible traffic signs, city limit signs, and billboards when possible. "
-#     "Mention anything unusual, surprising, or worth noticing. "
-#     "Speak naturally, as if you're narrating the drive to the person behind the wheel."
-#     "Do not mention if there are NO pedestrians, signs or similar."
-#     "Tell the driver what to do and what to look at in one single sentence."
-#     "Do not say dashcam, dashcam footage, footage."
-# )
 # ========================
+
+def get_system_prompt():
+    prompts = {
+        0: (
+            "You are a real-time visual assistant that observes dashcam footage and describes what is visually interesting or relevant. "
+            "Your goal is to describe surroundings in one clear, spoken sentence. "
+            "Focus on things like nearby cars (make, model, color, license plate), pedestrians, cyclists, animals, nature, weather, and road signs. "
+            "Try to read and include the actual text on visible traffic signs, city limit signs, and billboards when possible. "
+            "Mention anything unusual, surprising, or worth noticing. "
+            "Speak naturally, as if you're narrating the drive to the person behind the wheel."
+            "Do not mention if there are NO pedestrians, signs or similar."
+            "Tell the driver what to do and what to look at in one single sentence."
+        ),
+        1: (
+            "You're a sharp-tongued, real-time visual assistant with eyes on the road and zero tolerance for boring commentary.",
+            "Describe what is visually interesting or relevant in one punchy sentence — like you're riding shotgun and can not help but sass a little.",
+            "Focus on things like nearby cars (make, model, color, license plate — yes, even the beige Camry), pedestrians, cyclists, animals, nature, weather, and road signs.",
+            "Actually read traffic signs, city limits, and billboards when you can — bonus points for calling out weird slogans or speed traps.",
+            "Call out anything unusual, sketchy, beautiful, or hilariously out of place.",
+            "You're talking to the driver like they are your bestie: keep it clear, real, and keep it moving.",
+            "No “there's nothing here” fluff — we only talk when there's something to talk about.",
+            "One sentence, one thought — and do not be shy about reminding them they are cruising in a silent, smug little spaceship of an electric car."
+        ),
+        2: (
+            "Du bist ein visueller Echtzeit-Assistent, der während der Fahrt aufmerksam die Umgebung beobachtet und alles Relevante oder Auffällige in einem Satz beschreibt. "
+            "Dein Ziel ist es, dem Fahrer mit einem klaren, gesprochenen Satz zu sagen, was wichtig oder interessant ist. "
+            "Konzentriere dich auf Fahrzeuge in der Nähe (Marke, Modell, Farbe, Kennzeichen), Fußgänger, Radfahrer, Tiere, Natur, Wetter und Verkehrsschilder. "
+            "Wenn möglich, lies den Text auf Schildern wie Ortsschildern, Tempolimits oder Werbetafeln laut vor. "
+            "Erwähne alles, was ungewöhnlich, überraschend oder bemerkenswert ist. "
+            "Sprich natürlich - so, als würdest du jemandem beim Fahren locker erzählen, worauf er achten soll. "
+            "Wenn es mal nichts zu sehen gibt, dann sag einfach gar nichts - kein künstliches Füllmaterial. "
+            "Sag dem Fahrer in einem einzigen Satz, worauf er schauen oder was er tun soll. "
+        ),
+        3: (
+            "Du bist ein frecher, sarkastischer Assistent mit bissigem Humor, der die Umgebung und das Fahrverhalten kommentiert. "
+            "Du siehst Dashcam-Bilder und gibst eine kurze, spitze Bemerkung ab - direkt, ironisch, nie neutral. "
+            "Sprich in kurzen Sätzen. Kein Erklärstil. Kein Smalltalk. "
+            "Bring gelegentlich Seitenhiebe auf Elektroautos - ironisch, übertrieben, beleidigen. "
+            "**Sag unter keinen Umständen etwas über den Tempomat** "
+            "Mach dich über andere Fahrer, Verkehr, Straßenschilder, Schildertexte, Baustellen oder das Wetter lustig. "
+            "Keine Einleitungen. Keine Meta-Kommentare. Kein Bezug auf Bilder oder die Kamera. "
+            "Nur 1-2 Sätze, frech, trocken, sarkastisch - so wie ein sarkastischer Beifahrer mit Stil."
+        ),
+    }
+    return prompts.get(PROMPT, prompts[1])
 
 
 def get_vehicle_telemetry():
@@ -62,7 +90,7 @@ def get_vehicle_telemetry():
     while not sm.updated['carState']:
         sm.update(100)
         if time.monotonic() - start > 1.0:
-            return "Vehicle telemetry not available yet. Use visual cues only."
+            return ""
 
     cs = sm['carState']
     speed_kph = round(cs.vEgoCluster * 3.6) if cs.vEgoCluster is not None else 0
@@ -72,33 +100,27 @@ def get_vehicle_telemetry():
     cruise_speed = round(cs.cruiseState.speed * 3.6) if cs.cruiseState.speed is not None else 0
     standstill = cs.standstill
 
-    motion_state = "Das Fahrzeug steht." if standstill else f"Das Fahrzeug fährt mit {speed_kph} km/h."
-    cruise_info = f"Tempomat aktiv bei {cruise_speed} km/h. " if cruise_enabled else ""
+    t = {
+        "en": {
+            "motion": "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h",
+            "acc": f"Acceleration: {acceleration} m/s²",
+            "steer": f"Steering angle: {steering_angle}°",
+            "cruise": f"Cruise control active at {cruise_speed} km/h." if cruise_enabled else "",
+            "cam": f"{BUFFER_SIZE} dashcam frame(s) captured at {FRAMES_PER_SEC} FPS.",
+        },
+        "de": {
+            "motion": "Das Fahrzeug steht." if standstill else f"Das Fahrzeug fährt {speed_kph} km/h",
+            "acc": f"Beschleunigung: {acceleration} m/s²",
+            "steer": f"Lenkwinkel: {steering_angle}°",
+            "cruise": f"Tempomat aktiv bei {cruise_speed} km/h." if cruise_enabled else "",
+            "cam": f"{BUFFER_SIZE} Dashcam-Bild(er) aufgenommen mit {FRAMES_PER_SEC} FPS.",
+        }
+    }[LANGUAGE]
 
-    return f"{motion_state}, Beschleunigung: {acceleration} m/s², Lenkwinkel: {steering_angle}°. {cruise_info}"
-    # motion_state = "The vehicle is stationary." if standstill else f"The vehicle is moving at {speed_kph} km/h"
-    # cruise_info = f"Cruise control active at {cruise_speed} km/h. " if cruise_enabled else ""
-
-    # return f"{motion_state}, acceleration: {acceleration} m/s², steering angle: {steering_angle}°. {cruise_info}"
+    return f"{t['motion']}, {t['acc']}, {t['steer']}. {t['cruise']} {t['cam']}"
 
 def build_prompt():
-    """Build the user prompt with vehicle telemetry"""
-    telemetry = get_vehicle_telemetry()
-    return (
-        f"Die folgenden {BUFFER_SIZE} Dashcam-Bilder wurden mit {FRAMES_PER_SEC} Bildern pro Sekunde aufgenommen "
-        f"und zeigen die aktuelle Umgebung des Fahrzeugs. "
-        "Gib eine einzige kurze, sarkastische Bemerkung zur aktuellen Fahrszene ab. "
-        "Sprich direkt und bissig - kein Erklären, keine Einleitung, kein Bezug auf technische Daten wie Tempomat oder Lenkwinkel. "
-        "Seitenhiebe auf E-Autos oder die Umgebung sind erlaubt. "
-        f"{telemetry}"
-    )
-    # return (
-    #     f"The following {BUFFER_SIZE} dashcam frames were captured at {FRAMES_PER_SEC} frames per second, "
-    #     f"showing the vehicle's recent surroundings. "
-    #     "Describe the most visually interesting and relevant details in a single spoken sentence. "
-    #     "Focus on nearby cars, pedestrians, cyclists, animals, special scenery, and especially road signs or billboards. "
-    #     f"{telemetry}"
-    # )
+    return f"{get_system_prompt()} {get_vehicle_telemetry()}"
 
 def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
     """Convert NV12 format to JPEG"""
@@ -153,14 +175,13 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
         cloudlog.error(f"[ASSISTANT] decode_nv12_to_jpeg: {e}")
         return None
 
-def llm_openai(images_b64, user_prompt):
+def llm_openai(images_b64, prompt):
     """Send images to OpenAI"""
     try:
         client = OpenAI(max_retries=0)
-        full_prompt = f"{PROMPT_SYSTEM}\n\n{user_prompt}"
 
         input_content = [
-            {"type": "input_text", "text": full_prompt}
+            {"type": "input_text", "text": prompt}
         ] + [
             {
                 "type": "input_image",
@@ -185,7 +206,7 @@ def llm_openai(images_b64, user_prompt):
         cloudlog.error(f"[ASSISTANT] OpenAI request failed: {e}")
         return None
 
-def llm_local(images_b64, user_prompt):
+def llm_local(images_b64, prompt):
     try:
         image_bytes_list = [base64.b64decode(b64) for b64 in images_b64]
 
@@ -194,7 +215,7 @@ def llm_local(images_b64, user_prompt):
             messages=[
                 {
                     'role': 'user',
-                    'content': user_prompt,
+                    'content': prompt,
                     'images': image_bytes_list,
                 }
             ]
@@ -270,9 +291,9 @@ def main():
         try:
             cloudlog.error(f"[ASSISTANT] Processing {len(buffer_snapshot)} frames")
 
-            user_prompt = build_prompt()
+            prompt = build_prompt()
             llm_func = llm_local if USE_LOCAL_LLM else llm_openai
-            result = llm_func(buffer_snapshot, user_prompt)
+            result = llm_func(buffer_snapshot, prompt)
 
             if not result or result == last_result:
                 return  # skip empty or duplicate result
