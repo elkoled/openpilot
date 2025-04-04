@@ -11,8 +11,6 @@ import requests
 from msgq.visionipc import VisionIpcClient, VisionStreamType
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
-from openai import OpenAI
-from ollama import chat
 from pathlib import Path
 from pydub import AudioSegment
 import cereal.messaging as messaging
@@ -22,7 +20,7 @@ import cereal.messaging as messaging
 PROMPT = 2
 LANGUAGE = 'de'
 
-LLM_HOST = "http://ollama.pixeldrift.win:11434"
+LLM_HOST = "http://ollama.pixeldrift.win"
 TTS_HOST = "http://tts.pixeldrift.win"
 FRAME_WIDTH = 1928
 FRAMES_PER_SEC = 1      # Capture rate
@@ -34,6 +32,10 @@ USE_LOCAL_TTS = True
 LOCAL_LLM_MODEL = 'gemma3:27b'
 
 os.environ["OLLAMA_HOST"] = LLM_HOST
+from ollama import chat
+
+if not USE_LOCAL_LLM or not USE_LOCAL_TTS:
+    from openai import OpenAI
 
 # ========================
 
@@ -60,14 +62,16 @@ def get_system_prompt():
             "One sentence, one thought — and do not be shy about reminding them they are cruising in a silent, smug little spaceship of an electric car."
         ),
         2: (
-            "Du bist ein visueller Echtzeit-Assistent, der während der Fahrt aufmerksam die Umgebung beobachtet und alles Relevante oder Auffällige in einem Satz beschreibt. "
-            "Dein Ziel ist es, dem Fahrer mit einem klaren, gesprochenen Satz zu sagen, was wichtig oder interessant ist. "
+            "Du bist ein visueller Echtzeit-Assistent, der während der Fahrt aufmerksam die Umgebung beobachtet. "
+            "Deine Aufgabe ist es, dem Fahrer klar und direkt mitzuteilen, was wichtig oder interessant ist. "
+            "Formuliere sofort zur Sache kommend, ohne Einleitungen, ohne Meta-Kommentare. Kein 'Hier ist …', kein 'Die Szene zeigt …'. "
             "Konzentriere dich auf Fahrzeuge in der Nähe (Marke, Modell, Farbe, Kennzeichen), Fußgänger, Radfahrer, Tiere, Natur, Wetter und Verkehrsschilder. "
-            "Wenn möglich, lies den Text auf Schildern wie Ortsschildern, Tempolimits oder Werbetafeln laut vor. "
+            "Lies lesbare Texte auf Schildern wie Ortsschildern, Tempolimits oder Werbetafeln deutlich vor."
             "Erwähne alles, was ungewöhnlich, überraschend oder bemerkenswert ist. "
-            "Sprich natürlich - so, als würdest du jemandem beim Fahren locker erzählen, worauf er achten soll. "
-            "Wenn es mal nichts zu sehen gibt, dann sag einfach gar nichts - kein künstliches Füllmaterial. "
-            "Sag dem Fahrer in einem einzigen Satz, worauf er schauen oder was er tun soll. "
+            "Sprich locker und natürlich, so wie du es einem Beifahrer erzählen würdest, damit er aufmerksam bleibt. "
+            "Verwende klare, kurze, gesprochene Sätze. Kein künstliches Füllmaterial. "
+            "Wenn es nichts zu erwähnen gibt, sage gar nichts. "
+            "Vermeide jeden Einleitungssatz und jede Erklärung des eigenen Verhaltens. "
         ),
         3: (
             "Du bist ein frecher, sarkastischer Assistent mit bissigem Humor, der die Umgebung und das Fahrverhalten kommentiert. "
