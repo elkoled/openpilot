@@ -170,7 +170,7 @@ def build_prompt():
     return f"{get_system_prompt()} {get_vehicle_telemetry()}"
 
 def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
-    """Convert NV12 format to JPEG"""
+    """Convert NV12 format to JPEG with resizing and cropping to 896x896"""
     try:
         y_size = stride_y * height
         y = np.frombuffer(nv12_bytes[:y_size], dtype=np.uint8).reshape((height, stride_y))[:, :width]
@@ -214,6 +214,20 @@ def decode_nv12_to_jpeg(nv12_bytes, stride_y, width, height):
         ], axis=2)
 
         img = Image.fromarray(rgb)
+
+        # --- Resize and crop to 896x896 ---
+        target_size = 896
+        # First, scale height to target size, width scales proportionally
+        scale_factor = target_size / img.height
+        new_width = int(img.width * scale_factor)
+        img = img.resize((new_width, target_size), Image.LANCZOS)
+
+        # Now, crop horizontally to center
+        left = (new_width - target_size) // 2
+        right = left + target_size
+        img = img.crop((left, 0, right, target_size))
+        # ----------------------------------
+
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=50)
         return base64.b64encode(buf.getvalue()).decode()
