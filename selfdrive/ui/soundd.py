@@ -112,7 +112,7 @@ class Soundd:
         self.custom_sound_data = None
         self.custom_sound_frame = 0
 
-      return ret * MAX_VOLUME
+      return ret * self.current_volume
 
     # Otherwise, ignore all alerts and return silence
     return ret
