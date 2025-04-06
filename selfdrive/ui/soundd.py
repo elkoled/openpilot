@@ -167,7 +167,7 @@ class Soundd:
           self.play_audio_buffer(Path("/tmp/play.wav"))
           os.remove("/tmp/play.wav")
 
-        if sm.updated['microphone'] and self.current_alert == AudibleAlert.none: # only update volume filter when not playing alert
+        if sm.updated['microphone']: # TODO: always update the filter, workaround.
           self.spl_filter_weighted.update(sm["microphone"].soundPressureWeightedDb)
           self.current_volume = self.calculate_volume(float(self.spl_filter_weighted.x))
 
