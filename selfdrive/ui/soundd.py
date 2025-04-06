@@ -167,7 +167,7 @@ class Soundd:
           self.play_audio_buffer(Path("/tmp/play.wav"))
           os.remove("/tmp/play.wav")
 
-        if sm.updated['microphone']: # TODO: always update the filter, workaround.
+        if sm.updated['microphone'] and self.custom_sound_data is None: # TODO: always update the filter, workaround.
           self.spl_filter_weighted.update(sm["microphone"].soundPressureWeightedDb)
           self.current_volume = self.calculate_volume(float(self.spl_filter_weighted.x))
 
