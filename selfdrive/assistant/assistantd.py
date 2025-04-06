@@ -5,7 +5,6 @@ import base64
 from io import BytesIO
 from PIL import Image
 import numpy as np
-import threading
 import requests
 
 from msgq.visionipc import VisionIpcClient, VisionStreamType
@@ -331,7 +330,6 @@ def save_audio(audio_bytes, is_mp3=True, output_path=Path("/tmp/play.wav")):
         cloudlog.error(f"[ASSISTANT] Audio conversion failed: {e}")
 
 def main():
-    """Main service loop"""
     config_realtime_process([0, 1, 2, 3], priority=5)
     vision_client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
 
@@ -341,63 +339,43 @@ def main():
 
     cloudlog.error("[ASSISTANT] Connected to camera")
 
-    frame_buffer = []
     last_result = ""
-    last_capture_time = 0
     capture_interval = 1.0 / FRAMES_PER_SEC
-    processing = False
-
-    def process_frames(buffer_snapshot):
-        nonlocal processing, last_result
-        try:
-            cloudlog.error(f"[ASSISTANT] Processing {len(buffer_snapshot)} frames")
-
-            prompt = build_prompt()
-            llm_func = llm_local if USE_LOCAL_LLM else llm_openai
-            result = llm_func(buffer_snapshot, prompt)
-
-            if not result or result == last_result:
-                return  # skip empty or duplicate result
-            cloudlog.error(f"[ASSISTANT] Result: {result}")
-            tts_func = tts_local if USE_LOCAL_TTS else tts_openai
-            tts_func(result)
-            last_result = result
-            # TODO: find other way
-            time.sleep(TTS_PLAYBACK_DELAY)
-        except Exception as e:
-            cloudlog.error(f"[ASSISTANT] Processing error: {e}")
-        finally:
-            processing = False
 
     while True:
         try:
+            # Capture frame
             buf = vision_client.recv()
             if buf is None:
                 time.sleep(0.05)
                 continue
 
-            now = time.monotonic()
-            if now - last_capture_time >= capture_interval:
-                last_capture_time = now
+            buf_data = bytes(buf.data)
+            encoded = decode_nv12_to_jpeg(buf_data, buf.stride, FRAME_WIDTH, buf.height)
+            if not encoded:
+                continue
 
-                # Process frame
-                buf_data = bytes(buf.data)
-                encoded = decode_nv12_to_jpeg(buf_data, buf.stride, FRAME_WIDTH, buf.height)
-                if not encoded:
-                    continue
+            cloudlog.error("[ASSISTANT] Frame captured and processed")
 
-                # Manage buffer
-                frame_buffer.append(encoded)
-                if len(frame_buffer) > BUFFER_SIZE:
-                    frame_buffer.pop(0)
+            # Build prompt and process frame
+            prompt = build_prompt()
+            llm_func = llm_local if USE_LOCAL_LLM else llm_openai
+            result = llm_func([encoded], prompt)
 
-            # Start processing if we have enough frames and not already processing
-            if not processing and len(frame_buffer) == BUFFER_SIZE:
-                processing = True
-                buffer_snapshot = list(frame_buffer)
-                threading.Thread(target=process_frames, args=(buffer_snapshot,)).start()
+            if not result or result == last_result:
+                cloudlog.error("[ASSISTANT] Empty or duplicate result, skipping TTS")
+            else:
+                cloudlog.error(f"[ASSISTANT] Result: {result}")
+                tts_func = tts_local if USE_LOCAL_TTS else tts_openai
+                tts_func(result)
+                last_result = result
 
-            time.sleep(0.01)
+                # Wait after speaking to avoid overwhelming playback
+                time.sleep(TTS_PLAYBACK_DELAY)
+
+            # Wait for the next capture
+            time.sleep(capture_interval)
+
         except Exception as e:
             cloudlog.error(f"[ASSISTANT] Main loop error: {e}")
             time.sleep(1)  # Prevent tight error loops
