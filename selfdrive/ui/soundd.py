@@ -100,22 +100,37 @@ class Soundd:
   def get_sound_data(self, frames):
     ret = np.zeros(frames, dtype=np.float32)
 
-    # If a custom sound is loaded, play it once
+    # Play stock alert sound
+    if self.current_alert != AudibleAlert.none:
+      num_loops = sound_list[self.current_alert][1]
+      sound_data = self.loaded_sounds[self.current_alert]
+      written_frames = 0
+
+      current_sound_frame = self.current_sound_frame % len(sound_data)
+      loops = self.current_sound_frame // len(sound_data)
+
+      while written_frames < frames and (num_loops is None or loops < num_loops):
+        available_frames = sound_data.shape[0] - current_sound_frame
+        frames_to_write = min(available_frames, frames - written_frames)
+        ret[written_frames:written_frames+frames_to_write] = sound_data[current_sound_frame:current_sound_frame+frames_to_write]
+        written_frames += frames_to_write
+        current_sound_frame += frames_to_write
+        loops = current_sound_frame // len(sound_data)
+
+      self.current_sound_frame += frames
+
+    # Mix in custom sound
     if self.custom_sound_data is not None:
       remaining = len(self.custom_sound_data) - self.custom_sound_frame
       play_len = min(frames, remaining)
-      ret[:play_len] = self.custom_sound_data[self.custom_sound_frame:self.custom_sound_frame + play_len]
+      ret[:play_len] += self.custom_sound_data[self.custom_sound_frame:self.custom_sound_frame + play_len]
       self.custom_sound_frame += play_len
 
-      # Reset after playing once
       if self.custom_sound_frame >= len(self.custom_sound_data):
         self.custom_sound_data = None
         self.custom_sound_frame = 0
 
-      return ret * self.current_volume
-
-    # Otherwise, ignore all alerts and return silence
-    return ret
+    return ret * self.current_volume
 
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
     if status:
