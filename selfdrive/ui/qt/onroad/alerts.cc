@@ -107,10 +107,11 @@ void OnroadAlerts::paintEvent(QPaintEvent *event) {
   if (alert.text1 == "Reverse\nGear" && rear_cam_running) {
     if (rear_cam.hasFrame()) {
       QPixmap frame = rear_cam.frame();
-      QPixmap scaled_frame = frame.scaled(r.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+      QPixmap scaled_frame = frame.scaled(r.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
       int x = r.x() + (r.width() - scaled_frame.width()) / 2;
-      int y = r.y() + (r.height() - scaled_frame.height()) / 2;
-      p.drawPixmap(x, y, scaled_frame);
+      int y = r.y();
+      QRect source_rect(0, 0, scaled_frame.width(), r.height());
+      p.drawPixmap(r.x(), y, scaled_frame, source_rect.x(), source_rect.y(), r.width(), r.height());
     } else {
       p.setFont(InterFont(64));
       p.setPen(QColor(255, 255, 255));
