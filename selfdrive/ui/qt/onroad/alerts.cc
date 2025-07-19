@@ -15,7 +15,7 @@ void OnroadAlerts::updateState(const UIState &s) {
     // rear camera logic
     if (alert.text1 == "Reverse\nGear") {
       if (!rear_cam_running) {
-        rear_cam.start("http://192.168.1.254:8192");
+        rear_cam.start("rtsp://192.168.1.254");
         rear_cam_running = true;
       }
     } else if (rear_cam_running) {

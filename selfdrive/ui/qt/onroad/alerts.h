@@ -3,7 +3,7 @@
 #include <QWidget>
 
 #include "selfdrive/ui/ui.h"
-#include "selfdrive/ui/qt/onroad/mjpeg_stream.h"
+#include "selfdrive/ui/qt/onroad/rtsp_stream.h"
 #include "common/params.h"
 
 class OnroadAlerts : public QWidget {
@@ -43,6 +43,6 @@ protected:
 
   QColor bg;
   Alert alert = {};
-  MjpegStream rear_cam;
+  RtspStream rear_cam;
   bool rear_cam_running = false;
 };
