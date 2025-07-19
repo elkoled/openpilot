@@ -27,11 +27,20 @@ void RtspStream::start(const QString &url) {
   ffmpeg_process->setProperty("rtsp_url", url);
 
   QStringList args;
-  args << "-rtsp_transport" << "tcp"
+  args << "-fflags" << "nobuffer+flush_packets"
+       << "-flags" << "low_delay"
+       << "-rtsp_transport" << "tcp"
+       << "-rtsp_flags" << "prefer_tcp"
+       << "-max_delay" << "0"
+       << "-reorder_queue_size" << "0"
+       << "-probesize" << "32"
+       << "-analyzeduration" << "0"
        << "-i" << url
        << "-f" << "mjpeg"
-       << "-q:v" << "5"
-       << "-r" << "10"
+       << "-q:v" << "10"
+       << "-preset" << "ultrafast"
+       << "-tune" << "zerolatency"
+       << "-threads" << "1"
        << "-";
 
   connect(ffmpeg_process, &QProcess::readyReadStandardOutput, this, &RtspStream::onReadyRead);
@@ -61,7 +70,8 @@ void RtspStream::stop() {
 
 void RtspStream::onReadyRead() {
   if (!active) return;
-  buffer.append(ffmpeg_process->readAllStandardOutput());
+  QByteArray newData = ffmpeg_process->readAllStandardOutput();
+  buffer.append(newData);
   processBuffer();
 }
 
@@ -69,17 +79,27 @@ void RtspStream::processBuffer() {
   static const QByteArray jpeg_start = QByteArray::fromHex("FFD8");
   static const QByteArray jpeg_end = QByteArray::fromHex("FFD9");
 
-  while (true) {
+  while (buffer.size() > 512) {
     int start = buffer.indexOf(jpeg_start);
-    if (start == -1) return;
+    if (start == -1) {
+      if (buffer.size() > 2048) buffer.clear();
+      return;
+    }
 
     int end = buffer.indexOf(jpeg_end, start + 2);
-    if (end == -1) return;
+    if (end == -1) {
+      if (buffer.size() > 32768) buffer = buffer.right(16384);
+      return;
+    }
 
     QByteArray frame_data = buffer.mid(start, end - start + 2);
     buffer = buffer.mid(end + 2);
 
     extractFrame(frame_data);
+
+    if (buffer.size() > 16384) {
+      buffer.clear();
+    }
   }
 }
 

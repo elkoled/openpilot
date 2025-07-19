@@ -108,9 +108,8 @@ void OnroadAlerts::paintEvent(QPaintEvent *event) {
     if (rear_cam.hasFrame()) {
       QPixmap frame = rear_cam.frame();
       QPixmap scaled_frame = frame.scaled(r.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-      int y = r.y();
-      QRect source_rect(0, 0, scaled_frame.width(), r.height());
-      p.drawPixmap(r.x(), y, scaled_frame, source_rect.x(), source_rect.y(), r.width(), r.height());
+      int crop_top = scaled_frame.height() > r.height() ? scaled_frame.height() - r.height() : 0;
+      p.drawPixmap(r.x(), r.y(), scaled_frame, 0, crop_top, r.width(), r.height());
     } else {
       p.setFont(InterFont(64));
       p.setPen(QColor(255, 255, 255));
