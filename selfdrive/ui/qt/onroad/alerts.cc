@@ -1,14 +1,28 @@
 #include "selfdrive/ui/qt/onroad/alerts.h"
 
 #include <QPainter>
+#include <QDebug>
 #include <map>
 
 #include "selfdrive/ui/qt/util.h"
 
 void OnroadAlerts::updateState(const UIState &s) {
   Alert a = getAlert(*(s.sm), s.scene.started_frame);
-  if (!alert.equal(a)) {
+  bool new_alert = !alert.equal(a);
+  if (new_alert) {
     alert = a;
+
+    // rear camera logic
+    if (alert.text1 == "Reverse\nGear") {
+      if (!rear_cam_running) {
+        rear_cam.start("http://192.168.1.254:8192");
+        rear_cam_running = true;
+      }
+    } else if (rear_cam_running) {
+      rear_cam.stop();
+      rear_cam_running = false;
+    }
+
     update();
   }
 }
@@ -90,23 +104,37 @@ void OnroadAlerts::paintEvent(QPaintEvent *event) {
   p.drawRoundedRect(r, radius, radius);
   p.setCompositionMode(QPainter::CompositionMode_SourceOver);
 
-  // text
-  const QPoint c = r.center();
-  p.setPen(QColor(0xff, 0xff, 0xff));
-  p.setRenderHint(QPainter::TextAntialiasing);
-  if (alert.size == cereal::SelfdriveState::AlertSize::SMALL) {
-    p.setFont(InterFont(74, QFont::DemiBold));
-    p.drawText(r, Qt::AlignCenter, alert.text1);
-  } else if (alert.size == cereal::SelfdriveState::AlertSize::MID) {
-    p.setFont(InterFont(88, QFont::Bold));
-    p.drawText(QRect(0, c.y() - 125, width(), 150), Qt::AlignHCenter | Qt::AlignTop, alert.text1);
-    p.setFont(InterFont(66));
-    p.drawText(QRect(0, c.y() + 21, width(), 90), Qt::AlignHCenter, alert.text2);
-  } else if (alert.size == cereal::SelfdriveState::AlertSize::FULL) {
-    bool l = alert.text1.length() > 15;
-    p.setFont(InterFont(l ? 132 : 177, QFont::Bold));
-    p.drawText(QRect(0, r.y() + (l ? 240 : 270), width(), 600), Qt::AlignHCenter | Qt::TextWordWrap, alert.text1);
-    p.setFont(InterFont(88));
-    p.drawText(QRect(0, r.height() - (l ? 361 : 420), width(), 300), Qt::AlignHCenter | Qt::TextWordWrap, alert.text2);
+  if (alert.text1 == "Reverse\nGear" && rear_cam_running) {
+    if (rear_cam.hasFrame()) {
+      QPixmap frame = rear_cam.frame();
+      QPixmap scaled_frame = frame.scaled(r.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+      int x = r.x() + (r.width() - scaled_frame.width()) / 2;
+      int y = r.y() + (r.height() - scaled_frame.height()) / 2;
+      p.drawPixmap(x, y, scaled_frame);
+    } else {
+      p.setFont(InterFont(64));
+      p.setPen(QColor(255, 255, 255));
+      p.drawText(r, Qt::AlignCenter, "Loading rear camera...");
+    }
+  } else {
+    // text
+    const QPoint c = r.center();
+    p.setPen(QColor(0xff, 0xff, 0xff));
+    p.setRenderHint(QPainter::TextAntialiasing);
+    if (alert.size == cereal::SelfdriveState::AlertSize::SMALL) {
+      p.setFont(InterFont(74, QFont::DemiBold));
+      p.drawText(r, Qt::AlignCenter, alert.text1);
+    } else if (alert.size == cereal::SelfdriveState::AlertSize::MID) {
+      p.setFont(InterFont(88, QFont::Bold));
+      p.drawText(QRect(0, c.y() - 125, width(), 150), Qt::AlignHCenter | Qt::AlignTop, alert.text1);
+      p.setFont(InterFont(66));
+      p.drawText(QRect(0, c.y() + 21, width(), 90), Qt::AlignHCenter, alert.text2);
+    } else if (alert.size == cereal::SelfdriveState::AlertSize::FULL) {
+      bool l = alert.text1.length() > 15;
+      p.setFont(InterFont(l ? 132 : 177, QFont::Bold));
+      p.drawText(QRect(0, r.y() + (l ? 240 : 270), width(), 600), Qt::AlignHCenter | Qt::TextWordWrap, alert.text1);
+      p.setFont(InterFont(88));
+      p.drawText(QRect(0, r.height() - (l ? 361 : 420), width(), 300), Qt::AlignHCenter | Qt::TextWordWrap, alert.text2);
+    }
   }
 }
