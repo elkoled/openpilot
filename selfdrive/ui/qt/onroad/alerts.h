@@ -10,10 +10,12 @@ class OnroadAlerts : public QWidget {
   Q_OBJECT
 
 public:
-  OnroadAlerts(QWidget *parent = 0) : QWidget(parent) {
+  OnroadAlerts(QWidget *parent = 0) : QWidget(parent), rear_cam(this) {
     // Set up the callback for frame updates
     rear_cam.setFrameCallback([this]() {
-      QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection);
+      if (rear_cam_running && alert.text1 == "Reverse\nGear") {
+        QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection);
+      }
     });
   }
   void updateState(const UIState &s);

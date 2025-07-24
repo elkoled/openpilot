@@ -16,9 +16,13 @@ void OnroadAlerts::updateState(const UIState &s) {
     bool should_show_rear = (alert.text1 == "Reverse\nGear");
 
     if (should_show_rear && !rear_cam_running) {
+      // Start rear camera
+      qWarning() << "Starting rear camera...";
       rear_cam.start("rtsp://192.168.1.254");
       rear_cam_running = true;
     } else if (!should_show_rear && rear_cam_running) {
+      // Stop rear camera immediately when not needed
+      qWarning() << "Stopping rear camera...";
       rear_cam.stop();
       rear_cam_running = false;
     }
