@@ -32,8 +32,7 @@ void RtspStream::start(const QString &url) {
       << "-vf" << "hflip"
       << "-f" << "mjpeg"
       << "-q:v" << "8"
-      << "-r" << "30"                          // Back to 30fps
-      << "-threads" << "2"                     // Use multiple threads
+      << "-r" << "30"
       << "-";
 
   connect(ffmpeg_process, &QProcess::readyReadStandardOutput, this, &RtspStream::onReadyRead);
