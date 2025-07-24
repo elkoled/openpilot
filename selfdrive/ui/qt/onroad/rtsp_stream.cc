@@ -27,18 +27,19 @@ void RtspStream::start(const QString &url) {
   ffmpeg_process->setProperty("rtsp_url", url);
 
   QStringList args;
-  args << "-fflags" << "nobuffer"
-       << "-flags" << "low_delay"
-       << "-rtsp_transport" << "tcp"
-       << "-probesize" << "32"
-       << "-analyzeduration" << "0"
-       << "-i" << url
-       << "-vf" << "hflip"
-       << "-f" << "mjpeg"
-       << "-q:v" << "8"
-       << "-r" << "30"
-       << "-tune" << "zerolatency"
-       << "-";
+  args << "-fflags" << "nobuffer+flush_packets"
+      << "-flags" << "low_delay"
+      << "-rtsp_transport" << "udp"
+      << "-probesize" << "32"
+      << "-analyzeduration" << "0"
+      << "-max_delay" << "0"
+      << "-i" << url
+      << "-vf" << "hflip"
+      << "-f" << "mjpeg"
+      << "-q:v" << "8"
+      << "-r" << "30"
+      << "-tune" << "zerolatency"
+      << "-";
 
   connect(ffmpeg_process, &QProcess::readyReadStandardOutput, this, &RtspStream::onReadyRead);
   connect(ffmpeg_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
