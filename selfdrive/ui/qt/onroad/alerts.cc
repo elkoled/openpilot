@@ -13,12 +13,12 @@ void OnroadAlerts::updateState(const UIState &s) {
     alert = a;
 
     // rear camera logic
-    if (alert.text1 == "Reverse\nGear") {
-      if (!rear_cam_running) {
-        rear_cam.start("rtsp://192.168.1.254");
-        rear_cam_running = true;
-      }
-    } else if (rear_cam_running) {
+    bool should_show_rear = (alert.text1 == "Reverse\nGear");
+
+    if (should_show_rear && !rear_cam_running) {
+      rear_cam.start("rtsp://192.168.1.254");
+      rear_cam_running = true;
+    } else if (!should_show_rear && rear_cam_running) {
       rear_cam.stop();
       rear_cam_running = false;
     }
@@ -28,6 +28,11 @@ void OnroadAlerts::updateState(const UIState &s) {
 }
 
 void OnroadAlerts::clear() {
+  // clean up rear camera when clearing alerts
+  if (rear_cam_running) {
+    rear_cam.stop();
+    rear_cam_running = false;
+  }
   alert = {};
   update();
 }
@@ -107,9 +112,11 @@ void OnroadAlerts::paintEvent(QPaintEvent *event) {
   if (alert.text1 == "Reverse\nGear" && rear_cam_running) {
     if (rear_cam.hasFrame()) {
       QPixmap frame = rear_cam.frame();
-      QPixmap scaled_frame = frame.scaled(r.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-      int crop_top = scaled_frame.height() > r.height() ? scaled_frame.height() - r.height() : 0;
-      p.drawPixmap(r.x(), r.y(), scaled_frame, 0, crop_top, r.width(), r.height());
+      if (!frame.isNull()) {
+        QPixmap scaled_frame = frame.scaled(r.size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        int crop_top = scaled_frame.height() > r.height() ? (scaled_frame.height() - r.height()) / 2 : 0;
+        p.drawPixmap(r.x(), r.y(), scaled_frame, 0, crop_top, r.width(), r.height());
+      }
     } else {
       p.setFont(InterFont(64));
       p.setPen(QColor(255, 255, 255));
