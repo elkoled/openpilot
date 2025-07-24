@@ -27,17 +27,13 @@ void RtspStream::start(const QString &url) {
   ffmpeg_process->setProperty("rtsp_url", url);
 
   QStringList args;
-  args << "-fflags" << "nobuffer"
-      << "-flags" << "low_delay"
-      << "-rtsp_transport" << "tcp"
-      << "-probesize" << "32"
-      << "-analyzeduration" << "0"
+  args << "-rtsp_transport" << "tcp"
       << "-i" << url
       << "-vf" << "hflip"
       << "-f" << "mjpeg"
       << "-q:v" << "8"
-      << "-r" << "15"
-      << "-tune" << "zerolatency"
+      << "-r" << "30"                          // Back to 30fps
+      << "-threads" << "2"                     // Use multiple threads
       << "-";
 
   connect(ffmpeg_process, &QProcess::readyReadStandardOutput, this, &RtspStream::onReadyRead);
@@ -69,7 +65,7 @@ void RtspStream::onReadyRead() {
   if (!active) return;
   QByteArray newData = ffmpeg_process->readAllStandardOutput();
   buffer.append(newData);
-  processBuffer();
+    processBuffer();
 }
 
 void RtspStream::processBuffer() {
