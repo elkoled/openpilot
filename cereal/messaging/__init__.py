@@ -8,12 +8,14 @@ import msgq
 import os
 import capnp
 import time
+import math
 
-from typing import Optional, List, Union, Dict
+from typing import Optional, List, Union, Dict, Any
 
 from cereal import log
 from cereal.services import SERVICE_LIST
 from openpilot.common.util import MovingAverage
+from openpilot.common.swaglog import cloudlog
 
 NO_TRAVERSAL_LIMIT = 2**64-1
 
@@ -170,6 +172,9 @@ class SubMaster:
     # if freq and poll aren't specified, assume the max to be conservative
     assert frequency is None or poll is None, "Do not specify 'frequency' - frequency of the polled service will be used."
     self.update_freq = frequency or max([SERVICE_LIST[s].frequency for s in polled_services])
+    self._status_cache: Dict[str, Dict[str, bool]] = {s: {'alive': True, 'freq_ok': True, 'valid': True} for s in services}
+    self._startup_health_log_frames = max(5, int(self.update_freq)) if self.update_freq > 0 else 5
+    self._last_update_time = 0.0
 
     for s in services:
       p = self.poller if s not in self.non_polled_services else None
@@ -222,6 +227,9 @@ class SubMaster:
       self.alive[s] = (cur_time - self.recv_time[s]) < (10. / SERVICE_LIST[s].frequency) or (self.seen[s] and self.simulation)
       self.freq_ok[s] = self.freq_tracker[s].valid or self.simulation
 
+    self._last_update_time = cur_time
+    self._log_health_status(cur_time)
+
   def all_alive(self, service_list: Optional[List[str]] = None) -> bool:
     return all(self.alive[s] for s in (service_list or self.services) if s not in self.ignore_alive)
 
@@ -233,6 +241,122 @@ class SubMaster:
 
   def all_checks(self, service_list: Optional[List[str]] = None) -> bool:
     return self.all_alive(service_list) and self.all_freq_ok(service_list) and self.all_valid(service_list)
+
+  def _service_expected_interval(self, s: str) -> Optional[float]:
+    freq = SERVICE_LIST[s].frequency
+    return (1.0 / freq) if freq > 0 else None
+
+  def _frequency_stats(self, s: str) -> Dict[str, Optional[float]]:
+    tracker = self.freq_tracker[s]
+    avg_dt = tracker.avg_dt.get_average()
+    recent_dt = tracker.recent_avg_dt.get_average()
+
+    avg_freq = None
+    if tracker.avg_dt.count > 0 and math.isfinite(avg_dt) and avg_dt > 0:
+      avg_freq = 1.0 / avg_dt
+
+    recent_freq = None
+    if tracker.recent_avg_dt.count > 0 and math.isfinite(recent_dt) and recent_dt > 0:
+      recent_freq = 1.0 / recent_dt
+
+    return {
+      'avg_frequency': avg_freq,
+      'recent_frequency': recent_freq,
+      'avg_sample_count': tracker.avg_dt.count,
+      'recent_sample_count': tracker.recent_avg_dt.count,
+    }
+
+  def _service_check_failures(self, s: str) -> Dict[str, bool]:
+    return {
+      'alive': (not self.alive[s]) and (s not in self.ignore_alive),
+      'freq_ok': (not self.freq_ok[s]) and self._check_avg_freq(s),
+      'valid': (not self.valid[s]) and (s not in self.ignore_valid),
+    }
+
+  def _build_service_health(self, s: str, cur_time: float) -> Dict[str, Any]:
+    stats = self._frequency_stats(s)
+    last_recv = self.recv_time[s]
+    time_since_recv = (cur_time - last_recv) if last_recv > 0 else None
+    if time_since_recv is not None:
+      time_since_recv = round(time_since_recv, 3)
+
+    avg_freq = stats['avg_frequency']
+    if avg_freq is not None:
+      avg_freq = round(avg_freq, 3)
+
+    recent_freq = stats['recent_frequency']
+    if recent_freq is not None:
+      recent_freq = round(recent_freq, 3)
+
+    expected_interval = self._service_expected_interval(s)
+    if expected_interval is not None:
+      expected_interval = round(expected_interval, 3)
+
+    failures = self._service_check_failures(s)
+    effective_status = {k: not failed for k, failed in failures.items()}
+
+    return {
+      'service': s,
+      'alive': self.alive[s],
+      'freq_ok': self.freq_ok[s],
+      'valid': self.valid[s],
+      'seen': self.seen[s],
+      'effectiveStatus': effective_status,
+      'checkFailures': failures,
+      'failingChecks': [check for check, failed in failures.items() if failed],
+      'expectedFrequency': SERVICE_LIST[s].frequency,
+      'expectedInterval': expected_interval,
+      'timeSinceLastMessage': time_since_recv,
+      'avgFrequency': avg_freq,
+      'recentFrequency': recent_freq,
+      'avgSampleCount': stats['avg_sample_count'],
+      'recentSampleCount': stats['recent_sample_count'],
+      'recvFrame': self.recv_frame[s],
+      'logMonoTime': int(self.logMonoTime[s]),
+      'ignoredAliveCheck': s in self.ignore_alive,
+      'ignoredFreqCheck': not self._check_avg_freq(s),
+      'ignoredValidCheck': s in self.ignore_valid,
+    }
+
+  def _emit_service_health_event(self, s: str, cur_time: float, *, issue: bool, changed: bool,
+                                 status: Dict[str, bool], previous_status: Optional[Dict[str, bool]]) -> None:
+    health = self._build_service_health(s, cur_time)
+    health['statusChanged'] = changed
+    health['previousStatus'] = previous_status.copy() if isinstance(previous_status, dict) else previous_status
+    health['effectiveStatus'] = status.copy()
+    health['frame'] = int(self.frame)
+    if issue:
+      cloudlog.event('submaster_service_issue', error=True, **health)
+    else:
+      cloudlog.event('submaster_service_recovered', **health)
+
+  def _log_health_status(self, cur_time: float) -> None:
+    ready_frame = self._startup_health_log_frames
+    for s in self.services:
+      failures = self._service_check_failures(s)
+      status = {k: not failed for k, failed in failures.items()}
+      prev = self._status_cache.get(s)
+      changed = prev != status
+      issue = any(failures.values())
+      ready = self.seen[s] or self.frame >= ready_frame
+
+      if issue and ready and (changed or (not self.seen[s] and self.frame == ready_frame)):
+        self._emit_service_health_event(s, cur_time, issue=True, changed=changed, status=status, previous_status=prev)
+      elif prev is not None and not issue and not all(prev.values()) and changed:
+        self._emit_service_health_event(s, cur_time, issue=False, changed=changed, status=status, previous_status=prev)
+
+      self._status_cache[s] = status.copy()
+
+  def get_health_snapshot(self, service_list: Optional[List[str]] = None, only_issues: bool = False) -> Dict[str, Dict[str, Any]]:
+    services = service_list or self.services
+    cur_time = self._last_update_time or time.monotonic()
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    for s in services:
+      health = self._build_service_health(s, cur_time)
+      if only_issues and not health['failingChecks']:
+        continue
+      snapshot[s] = health
+    return snapshot
 
 
 class PubMaster:

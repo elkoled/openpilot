@@ -127,8 +127,11 @@ class SelfdriveD(CruiseHelper):
     self.distance_traveled = 0
     self.last_functional_fan_frame = 0
     self.events_prev = []
-    self.logged_comm_issue = None
+    self.logged_comm_issue_signature = None
+    self.logged_comm_issue_details = None
+    self.logged_comm_issue_health_snapshot = None
     self.not_running_prev = None
+    self.last_process_issue_details = None
     self.experimental_mode = False
     self.personality = self.params.get("LongitudinalPersonality", return_default=True)
     self.recalibrating_seen = False
@@ -325,10 +328,39 @@ class SelfdriveD(CruiseHelper):
     num_events = len(self.events)
 
     not_running = {p.name for p in self.sm['managerState'].processes if not p.running and p.shouldBeRunning}
-    if self.sm.recv_frame['managerState'] and len(not_running):
-      if not_running != self.not_running_prev:
-        cloudlog.event("process_not_running", not_running=not_running, error=True)
-      self.not_running_prev = not_running
+    if self.sm.recv_frame['managerState']:
+      if len(not_running):
+        if not_running != self.not_running_prev:
+          prev = self.not_running_prev or set()
+          details = {p.name: {
+            'running': bool(p.running),
+            'shouldBeRunning': bool(p.shouldBeRunning),
+            'pid': int(p.pid),
+            'exitCode': int(p.exitCode),
+          } for p in self.sm['managerState'].processes if p.name in not_running}
+          cloudlog.event(
+            "process_not_running",
+            error=True,
+            not_running=sorted(list(not_running)),
+            new_issues=sorted(list(not_running - prev)),
+            recovered=sorted(list(prev - not_running)),
+            ignored_processes=sorted(list(self.ignored_processes)),
+            manager_state_frame=int(self.sm.recv_frame['managerState']),
+            process_states=details,
+            frame=int(self.sm.frame),
+          )
+          self.last_process_issue_details = details
+      elif self.not_running_prev:
+        cloudlog.event(
+          "process_not_running_resolved",
+          recovered=sorted(list(self.not_running_prev)),
+          frame=int(self.sm.frame),
+          last_issue=self.last_process_issue_details or {},
+          ignored_processes=sorted(list(self.ignored_processes)),
+          manager_state_frame=int(self.sm.recv_frame['managerState']),
+        )
+        self.last_process_issue_details = None
+      self.not_running_prev = set(not_running)
     if self.sm.recv_frame['managerState'] and (not_running - self.ignored_processes):
       self.events.add(EventName.processNotRunning)
     else:
@@ -368,11 +400,47 @@ class SelfdriveD(CruiseHelper):
         'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
         'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
       }
-      if logs != self.logged_comm_issue:
-        cloudlog.event("commIssue", error=True, **logs)
-        self.logged_comm_issue = logs
+      health_snapshot = self.sm.get_health_snapshot(only_issues=True)
+      issue_signature = (
+        tuple(sorted(logs['invalid'])),
+        tuple(sorted(logs['not_alive'])),
+        tuple(sorted(logs['not_freq_ok'])),
+        tuple(sorted((svc, tuple(int(health_snapshot[svc][key]) for key in ('alive', 'freq_ok', 'valid'))) for svc in health_snapshot)),
+      )
+      if issue_signature != self.logged_comm_issue_signature:
+        event_payload = {
+          **logs,
+          'frame': int(self.sm.frame),
+          'health_snapshot': health_snapshot,
+          'ratekeeper': {
+            'lagging': bool(self.rk.lagging),
+            'remaining': self.rk.remaining,
+          },
+          'carState': {
+            'canValid': bool(CS.canValid),
+            'canTimeout': bool(CS.canTimeout),
+          },
+          'all_checks': {
+            'alive': self.sm.all_alive(),
+            'freq_ok': self.sm.all_freq_ok(),
+            'valid': self.sm.all_valid(),
+          },
+        }
+        cloudlog.event("commIssue", error=True, **event_payload)
+        self.logged_comm_issue_signature = issue_signature
+        self.logged_comm_issue_details = {k: list(v) for k, v in logs.items()}
+        self.logged_comm_issue_health_snapshot = health_snapshot
     else:
-      self.logged_comm_issue = None
+      if self.logged_comm_issue_signature is not None:
+        cloudlog.event(
+          "commIssue_resolved",
+          frame=int(self.sm.frame),
+          last_issue=self.logged_comm_issue_details or {},
+          last_health_snapshot=self.logged_comm_issue_health_snapshot or {},
+        )
+      self.logged_comm_issue_signature = None
+      self.logged_comm_issue_details = None
+      self.logged_comm_issue_health_snapshot = None
 
     if not self.CP.notCar:
       if not self.sm['livePose'].posenetOK:
