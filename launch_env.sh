@@ -11,4 +11,4 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
-export FINGERPRINT="PSA_PEUGEOT_208"
+export FINGERPRINT="PSA_PEUGEOT_508"
