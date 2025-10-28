@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import importlib
 import os
 import signal
 import struct
 import time
 import subprocess
+import traceback
 from collections.abc import Callable, ValuesView
 from abc import ABC, abstractmethod
 from multiprocessing import Process
@@ -17,6 +20,7 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.watchdog import WATCHDOG_FN
+from openpilot.system.manager.service_monitor import service_monitor
 
 ENABLE_WATCHDOG = os.getenv("NO_WATCHDOG") is None
 
@@ -41,6 +45,8 @@ def launcher(proc: str, name: str) -> None:
   except KeyboardInterrupt:
     cloudlog.warning(f"child {proc} got SIGINT")
   except Exception:
+    stacktrace = traceback.format_exc()
+    service_monitor.log_process_exception(name=name, stacktrace=stacktrace)
     # can't install the crash handler because sys.excepthook doesn't play nice
     # with threads, so catch it here.
     sentry.capture_exception()
@@ -84,8 +90,13 @@ class ManagerProcess(ABC):
   def start(self) -> None:
     pass
 
-  def restart(self) -> None:
-    self.stop(sig=signal.SIGKILL)
+  def restart(self, reason: str | None = None) -> None:
+    setattr(self, "_pending_restart", True)
+    service_monitor.log_process_restart(name=self.name, reason=reason)
+    try:
+      self.stop(sig=signal.SIGKILL)
+    finally:
+      setattr(self, "_pending_restart", False)
     self.start()
 
   def check_watchdog(self, started: bool) -> None:
@@ -103,8 +114,9 @@ class ManagerProcess(ABC):
 
     if dt > self.watchdog_max_dt:
       if self.watchdog_seen and ENABLE_WATCHDOG:
+        service_monitor.log_watchdog_timeout(name=self.name, elapsed=dt, exit_code=self.proc.exitcode)
         cloudlog.error(f"Watchdog timeout for {self.name} (exitcode {self.proc.exitcode}) restarting ({started=})")
-        self.restart()
+        self.restart(reason="watchdog_timeout")
     else:
       self.watchdog_seen = True
 
@@ -133,6 +145,13 @@ class ManagerProcess(ABC):
 
     ret = self.proc.exitcode
     cloudlog.info(f"{self.name} is dead with {ret}")
+    service_monitor.log_process_exit(
+      name=self.name,
+      pid=self.proc.pid,
+      exit_code=self.proc.exitcode,
+      shutting_down=self.shutting_down,
+      restart=getattr(self, "_pending_restart", False),
+    )
 
     if self.proc.exitcode is not None:
       self.shutting_down = False
@@ -194,6 +213,7 @@ class NativeProcess(ManagerProcess):
     self.proc.start()
     self.watchdog_seen = False
     self.shutting_down = False
+    service_monitor.log_process_start(name=self.name, pid=self.proc.pid)
 
 
 class PythonProcess(ManagerProcess):
@@ -228,6 +248,7 @@ class PythonProcess(ManagerProcess):
     self.proc.start()
     self.watchdog_seen = False
     self.shutting_down = False
+    service_monitor.log_process_start(name=self.name, pid=self.proc.pid)
 
 
 class DaemonProcess(ManagerProcess):
@@ -271,6 +292,7 @@ class DaemonProcess(ManagerProcess):
                                preexec_fn=os.setpgrp)
 
     self.params.put(self.param_name, proc.pid)
+    service_monitor.log_process_start(name=self.name, pid=proc.pid)
 
   def stop(self, retry=True, block=True, sig=None) -> None:
     pass

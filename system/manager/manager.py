@@ -19,6 +19,7 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.system.version import get_build_metadata, terms_version, training_version
 from openpilot.system.hardware.hw import Paths
+from openpilot.system.manager.service_monitor import service_monitor
 
 
 def manager_init() -> None:
@@ -93,6 +94,13 @@ def manager_init() -> None:
                        commit=build_metadata.openpilot.git_commit,
                        dirty=build_metadata.openpilot.is_dirty,
                        device=HARDWARE.get_device_type())
+  service_monitor.log_manager_init(
+    serial=serial,
+    version=build_metadata.openpilot.version,
+    branch=build_metadata.channel,
+    commit=build_metadata.openpilot.git_commit,
+    dirty=build_metadata.openpilot.is_dirty,
+  )
 
   # preimport all processes
   for p in managed_processes.values():
@@ -109,6 +117,7 @@ def manager_cleanup() -> None:
     p.stop(block=True)
 
   cloudlog.info("everything is dead")
+  service_monitor.log_manager_cleanup()
 
 
 def manager_thread() -> None:
@@ -124,6 +133,7 @@ def manager_thread() -> None:
   if os.getenv("NOBOARD") is not None:
     ignore.append("pandad")
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
+  service_monitor.log_manager_start(ignore=ignore, environ=os.environ)
 
   sm = messaging.SubMaster(['deviceState', 'carParams', 'pandaStates'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
@@ -161,6 +171,7 @@ def manager_thread() -> None:
                        for p in managed_processes.values() if p.proc)
     print(running)
     cloudlog.debug(running)
+    service_monitor.log_process_snapshot(managed_processes)
 
     # send managerState
     msg = messaging.new_message('managerState', valid=True)
@@ -182,6 +193,7 @@ def manager_thread() -> None:
         shutdown = True
         params.put("LastManagerExitReason", f"{param} {datetime.datetime.now()}")
         cloudlog.warning(f"Shutting down manager - {param} set")
+        service_monitor.log_shutdown_request(param)
 
     if shutdown:
       break
@@ -198,6 +210,7 @@ def main() -> None:
   try:
     manager_thread()
   except Exception:
+    service_monitor.log_exception("manager_thread")
     traceback.print_exc()
     sentry.capture_exception()
   finally:
@@ -223,6 +236,7 @@ if __name__ == "__main__":
   except KeyboardInterrupt:
     print("got CTRL-C, exiting")
   except Exception:
+    service_monitor.log_exception("manager_main")
     add_file_handler(cloudlog)
     cloudlog.exception("Manager failed to start")
 
