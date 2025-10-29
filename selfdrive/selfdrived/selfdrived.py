@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import os
+import signal
 import time
 import threading
+import traceback
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import cereal.messaging as messaging
 
@@ -21,6 +25,7 @@ from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
+from openpilot.system.manager.process_config import STACKTRACE_CAPABLE_PROCESSES
 from openpilot.system.manager.service_monitor import service_monitor
 from openpilot.system.version import get_build_metadata
 
@@ -36,6 +41,106 @@ SIMULATION = "SIMULATION" in os.environ
 TESTING_CLOSET = "TESTING_CLOSET" in os.environ
 
 LONGITUDINAL_PERSONALITY_MAP = {v: k for k, v in log.LongitudinalPersonality.schema.enumerants.items()}
+STACKTRACE_CAPABLE_PROCESSES_SET = frozenset(STACKTRACE_CAPABLE_PROCESSES)
+
+
+def _safe_read_text(path: Path) -> Optional[str]:
+  try:
+    return path.read_text(errors='replace')
+  except (FileNotFoundError, PermissionError, OSError):
+    return None
+
+
+def _read_proc_cmdline(pid: int) -> Optional[List[str]]:
+  try:
+    raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+  except (FileNotFoundError, PermissionError, OSError):
+    return None
+
+  parts = [segment.decode(errors='replace') for segment in raw.split(b"\0") if segment]
+  return parts
+
+
+def _read_proc_key_value(pid: int, name: str, keys: Optional[Tuple[str, ...]] = None) -> Optional[Dict[str, str]]:
+  raw = _safe_read_text(Path(f"/proc/{pid}/{name}"))
+  if raw is None:
+    return None
+
+  result: Dict[str, str] = {}
+  for line in raw.splitlines():
+    key, _, value = line.partition(":")
+    if not key:
+      continue
+    key = key.strip()
+    if keys is None or key in keys:
+      result[key] = value.strip()
+  return result
+
+
+def _read_proc_link(pid: int, name: str) -> Optional[str]:
+  try:
+    return os.readlink(f"/proc/{pid}/{name}")
+  except (FileNotFoundError, PermissionError, OSError):
+    return None
+
+
+def _count_open_fds(pid: int) -> Optional[int]:
+  fd_dir = Path(f"/proc/{pid}/fd")
+  try:
+    return sum(1 for _ in fd_dir.iterdir())
+  except (FileNotFoundError, PermissionError, OSError):
+    return None
+
+
+def _collect_process_diagnostics(proc_state) -> Dict[str, Any]:
+  pid = int(proc_state.pid)
+  diag: Dict[str, Any] = {
+    "name": proc_state.name,
+    "pid": pid,
+    "running": bool(proc_state.running),
+    "shouldBeRunning": bool(proc_state.shouldBeRunning),
+    "exitCode": int(proc_state.exitCode),
+    "supportsStacktrace": proc_state.name in STACKTRACE_CAPABLE_PROCESSES_SET,
+  }
+
+  if pid > 0:
+    cmdline = _read_proc_cmdline(pid)
+    if cmdline is not None:
+      diag["cmdline"] = cmdline
+
+    status_keys = ("Name", "State", "Threads", "VmRSS", "VmSize", "voluntary_ctxt_switches", "nonvoluntary_ctxt_switches")
+    status = _read_proc_key_value(pid, "status", status_keys)
+    if status is not None:
+      diag["status"] = status
+
+    io_keys = ("rchar", "wchar", "syscr", "syscw", "read_bytes", "write_bytes")
+    io_stats = _read_proc_key_value(pid, "io", io_keys)
+    if io_stats is not None:
+      diag["io"] = io_stats
+
+    diag["cwd"] = _read_proc_link(pid, "cwd")
+    diag["exe"] = _read_proc_link(pid, "exe")
+    diag["fd_count"] = _count_open_fds(pid)
+
+  return diag
+
+
+def _summarize_panda_state(ps) -> Dict[str, Any]:
+  summary: Dict[str, Any] = {
+    'pandaType': int(ps.pandaType),
+    'ignitionLine': bool(ps.ignitionLine),
+    'ignitionCan': bool(ps.ignitionCan),
+    'voltage': float(ps.voltage),
+    'current': float(ps.current),
+    'safetyModel': int(ps.safetyModel),
+    'safetyParam': int(ps.safetyParam),
+    'alternativeExperience': int(ps.alternativeExperience),
+  }
+  try:
+    summary['faults'] = [int(fault) for fault in ps.faults]
+  except Exception:
+    summary['faults'] = []
+  return summary
 
 ThermalStatus = log.DeviceState.ThermalStatus
 State = log.SelfdriveState.OpenpilotState
@@ -131,6 +236,10 @@ class SelfdriveD(CruiseHelper):
     self.last_functional_fan_frame = 0
     self.events_prev = []
     self.logged_comm_issue = None
+    self.comm_issue_active = False
+    self.stacktrace_request_context: Dict[str, Tuple[int, str]] = {}
+    self.self_stacktrace_token: Optional[Tuple[int, str]] = None
+    self.last_comm_issue_reason: Optional[str] = None
     self.not_running_prev = None
     self.experimental_mode = False
     self.personality = get_sanitize_int_param(
@@ -373,13 +482,15 @@ class SelfdriveD(CruiseHelper):
         self.events.add(EventName.commIssue)
 
       logs = {
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+        'invalid': sorted([s for s, valid in self.sm.valid.items() if not valid]),
+        'not_alive': sorted([s for s, alive in self.sm.alive.items() if not alive]),
+        'not_freq_ok': sorted([s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok]),
       }
-      if logs != self.logged_comm_issue:
+
+      previous_logs = self.logged_comm_issue
+      if logs != previous_logs:
         cloudlog.event("commIssue", error=True, **logs)
-        self.logged_comm_issue = logs
+      self.logged_comm_issue = {k: list(v) for k, v in logs.items()}
 
       if logs['not_alive']:
         reason = 'not_alive'
@@ -391,8 +502,8 @@ class SelfdriveD(CruiseHelper):
         reason = 'unknown'
 
       frame = int(self.sm.frame)
-      recv_frame = {}
-      frame_age = {}
+      recv_frame: Dict[str, int] = {}
+      frame_age: Dict[str, Optional[int]] = {}
       for name, frame_id in self.sm.recv_frame.items():
         try:
           numeric_id = int(frame_id)
@@ -401,16 +512,44 @@ class SelfdriveD(CruiseHelper):
         recv_frame[name] = numeric_id
         frame_age[name] = frame - numeric_id if numeric_id >= 0 else None
 
-      manager_processes = []
+      manager_processes: List[Dict[str, Any]] = []
+      process_diagnostics: List[Dict[str, Any]] = []
       if self.sm.recv_frame['managerState']:
         for proc_state in self.sm['managerState'].processes:
-          manager_processes.append({
+          base = {
             'name': proc_state.name,
             'running': bool(proc_state.running),
             'shouldBeRunning': bool(proc_state.shouldBeRunning),
             'pid': int(proc_state.pid),
             'exitCode': int(proc_state.exitCode),
-          })
+            'supportsStacktrace': proc_state.name in STACKTRACE_CAPABLE_PROCESSES_SET,
+            'ignored': proc_state.name in self.ignored_processes,
+          }
+          manager_processes.append(base)
+          process_diagnostics.append(_collect_process_diagnostics(proc_state))
+
+      issue_context_changed = (
+        not self.comm_issue_active or
+        previous_logs is None or
+        any(sorted(previous_logs.get(k, [])) != logs[k] for k in logs) or
+        reason != self.last_comm_issue_reason
+      )
+
+      if issue_context_changed:
+        self.stacktrace_request_context.clear()
+        self.self_stacktrace_token = None
+
+      self.comm_issue_active = True
+      self.last_comm_issue_reason = reason
+
+      stacktrace_requests = []
+      if manager_processes:
+        stacktrace_requests = self._request_comm_issue_stacktraces(manager_processes, reason, frame)
+
+      self_stacktrace = ''.join(traceback.format_stack())
+      if self.self_stacktrace_token is None or issue_context_changed:
+        service_monitor.log_process_stacktrace(name="selfdrived", trigger=f"comm_issue:{reason}", stacktrace=self_stacktrace)
+      self.self_stacktrace_token = (frame, reason)
 
       events_mapping = self.events.get_events_mapping()
       seen_event_names = set()
@@ -427,11 +566,124 @@ class SelfdriveD(CruiseHelper):
         'frame': int(self.rk.frame),
         'lagging': bool(self.rk.lagging),
         'remaining': float(self.rk.remaining),
+        'interval': float(self.rk._interval),
+        'print_delay_threshold': self.rk._print_delay_threshold,
+        'last_monitor_time': getattr(self.rk, '_last_monitor_time', None),
+        'next_frame_time': getattr(self.rk, '_next_frame_time', None),
+        'avg_dt_samples': self.rk.avg_dt.count,
       }
       try:
         ratekeeper_state['avg_dt'] = float(self.rk.avg_dt.get_average())
       except Exception:
         pass
+
+      thread_dump = [{
+        'name': thread.name,
+        'ident': thread.ident,
+        'daemon': thread.daemon,
+        'native_id': getattr(thread, 'native_id', None),
+        'alive': thread.is_alive(),
+      } for thread in threading.enumerate()]
+
+      monotonic_now = time.monotonic()
+      submaster_details: Dict[str, Dict[str, Any]] = {}
+      for service_name in sorted(self.sm.services):
+        tracker = self.sm.freq_tracker.get(service_name)
+        detail: Dict[str, Any] = {
+          'seen': bool(self.sm.seen[service_name]),
+          'recv_time': float(self.sm.recv_time[service_name]),
+          'recv_frame': int(self.sm.recv_frame[service_name]),
+          'logMonoTime': int(self.sm.logMonoTime[service_name]),
+          'valid': bool(self.sm.valid[service_name]),
+          'alive': bool(self.sm.alive[service_name]),
+          'freq_ok': bool(self.sm.freq_ok[service_name]),
+          'updated': bool(self.sm.updated[service_name]),
+          'age_sec': None,
+        }
+        if self.sm.recv_time[service_name]:
+          detail['age_sec'] = max(0.0, monotonic_now - self.sm.recv_time[service_name])
+        if service_name in messaging.SERVICE_LIST:
+          detail['expected_frequency_hz'] = float(messaging.SERVICE_LIST[service_name].frequency)
+        if tracker is not None:
+          detail['min_freq'] = getattr(tracker, 'min_freq', None)
+          detail['max_freq'] = getattr(tracker, 'max_freq', None)
+          detail['avg_dt_samples'] = tracker.avg_dt.count
+          detail['recent_avg_dt_samples'] = tracker.recent_avg_dt.count
+          if tracker.avg_dt.count:
+            detail['avg_dt'] = float(tracker.avg_dt.get_average())
+          if tracker.recent_avg_dt.count:
+            detail['recent_avg_dt'] = float(tracker.recent_avg_dt.get_average())
+        submaster_details[service_name] = detail
+
+      submaster_meta = {
+        'services': list(self.sm.services),
+        'ignore_alive': list(self.sm.ignore_alive),
+        'ignore_valid': list(self.sm.ignore_valid),
+        'ignore_avg_freq': list(self.sm.ignore_average_freq),
+        'non_polled_services': list(self.sm.non_polled_services),
+        'update_freq': float(self.sm.update_freq),
+        'frame': frame,
+      }
+
+      try:
+        panda_summaries = [_summarize_panda_state(ps) for ps in self.sm['pandaStates']]
+      except Exception:
+        panda_summaries = []
+
+      try:
+        device_state_summary = {
+          'thermalStatus': int(self.sm['deviceState'].thermalStatus),
+          'fanSpeedPercentDesired': float(self.sm['deviceState'].fanSpeedPercentDesired),
+          'fanSpeedRpm': int(self.sm['deviceState'].fanSpeedRpm),
+          'freeSpacePercent': float(self.sm['deviceState'].freeSpacePercent),
+          'memoryUsagePercent': float(self.sm['deviceState'].memoryUsagePercent),
+          'cpuTempC': [float(temp) for temp in self.sm['deviceState'].cpuTempC],
+          'gpuTempC': [float(temp) for temp in self.sm['deviceState'].gpuTempC],
+          'ambientTempC': float(self.sm['deviceState'].ambientTempC),
+          'storageHealthy': bool(self.sm['deviceState'].storageHealthy),
+          'voltage': float(self.sm['deviceState'].voltage),
+          'current': float(self.sm['deviceState'].current),
+        }
+      except Exception:
+        device_state_summary = {}
+
+      try:
+        peripheral_state_summary = {
+          'fanSpeedRpm': int(self.sm['peripheralState'].fanSpeedRpm),
+          'pandaType': int(self.sm['peripheralState'].pandaType),
+          'ignitionLine': bool(self.sm['peripheralState'].ignitionLine),
+          'ignitionCan': bool(self.sm['peripheralState'].ignitionCan),
+          'usbHubPresent': bool(self.sm['peripheralState'].usbHubPresent),
+        }
+      except Exception:
+        peripheral_state_summary = {}
+
+      try:
+        controls_state_summary = {
+          'enabled': bool(self.sm['controlsState'].enabled),
+          'active': bool(self.sm['controlsState'].active),
+          'curvature': float(self.sm['controlsState'].curvature),
+          'steeringAngleDesiredDeg': float(self.sm['controlsState'].steeringAngleDesiredDeg),
+          'steeringAngleDeg': float(self.sm['controlsState'].steeringAngleDeg),
+          'longControlActive': bool(self.sm['controlsState'].longControlActive),
+        }
+      except Exception:
+        controls_state_summary = {}
+
+      try:
+        car_state_summary = {
+          'vEgo': float(CS.vEgo),
+          'aEgo': float(CS.aEgo),
+          'gearShifter': int(CS.gearShifter),
+          'standstill': bool(CS.standstill),
+          'gasPressed': bool(CS.gasPressed),
+          'brakePressed': bool(CS.brakePressed),
+          'steeringPressed': bool(CS.steeringPressed),
+          'leftBlinker': bool(CS.leftBlinker),
+          'rightBlinker': bool(CS.rightBlinker),
+        }
+      except Exception:
+        car_state_summary = {}
 
       service_monitor.log_comm_issue(
         reason=reason,
@@ -454,10 +706,31 @@ class SelfdriveD(CruiseHelper):
           'camera_packets': list(self.camera_packets),
           'sensor_packets': list(self.sensor_packets),
           'gps_packets': list(self.gps_packets),
+          'thread_dump': thread_dump,
+          'submaster': submaster_details,
+          'submaster_meta': submaster_meta,
+          'process_diagnostics': process_diagnostics,
+          'stacktrace_requests': stacktrace_requests,
+          'selfdrived_stacktrace': self_stacktrace,
+          'panda_states': panda_summaries,
+          'device_state': device_state_summary,
+          'peripheral_state': peripheral_state_summary,
+          'controls_state': controls_state_summary,
+          'car_state': car_state_summary,
+          'monotonic_time': monotonic_now,
+          'wall_time': time.time(),
+          'comm_issue_context': {
+            'reason': reason,
+            'issue_context_changed': bool(issue_context_changed),
+          },
         },
       )
     else:
       self.logged_comm_issue = None
+      self.comm_issue_active = False
+      self.stacktrace_request_context.clear()
+      self.self_stacktrace_token = None
+      self.last_comm_issue_reason = None
 
     if not self.CP.notCar:
       if not self.sm['livePose'].posenetOK:
@@ -530,6 +803,64 @@ class SelfdriveD(CruiseHelper):
         self.experimental_mode_switched = False
 
     self.icbm.run(CS, self.sm['carControl'], self.sm['longitudinalPlanSP'], self.is_metric)
+
+  def _request_comm_issue_stacktraces(self, processes: List[Dict[str, Any]], reason: str, frame: int) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    signal_name = signal.Signals(signal.SIGUSR1).name
+
+    for proc in processes:
+      entry = {
+        'name': proc['name'],
+        'pid': proc['pid'],
+        'running': proc['running'],
+        'supportsStacktrace': proc['supportsStacktrace'],
+      }
+
+      if not proc['supportsStacktrace']:
+        entry['status'] = 'unsupported'
+        results.append(entry)
+        continue
+
+      if proc['pid'] <= 0:
+        entry['status'] = 'missing_pid'
+        results.append(entry)
+        continue
+
+      if not proc['running']:
+        entry['status'] = 'not_running'
+        results.append(entry)
+        continue
+
+      existing = self.stacktrace_request_context.get(proc['name'])
+      if existing is not None:
+        entry['status'] = 'already_requested'
+        entry['requested_frame'] = existing[0]
+        entry['requested_reason'] = existing[1]
+        results.append(entry)
+        continue
+
+      try:
+        os.kill(proc['pid'], signal.SIGUSR1)
+      except ProcessLookupError:
+        entry['status'] = 'process_lookup_error'
+      except PermissionError:
+        entry['status'] = 'permission_denied'
+      except OSError as err:
+        entry['status'] = f'error:{err.__class__.__name__}'
+      else:
+        entry['status'] = 'signaled'
+        entry['signal'] = signal_name
+        self.stacktrace_request_context[proc['name']] = (frame, reason)
+        service_monitor.log_stacktrace_request(
+          name=proc['name'],
+          pid=proc['pid'],
+          signal=signal_name,
+          reason=f"comm_issue:{reason}",
+        )
+
+      results.append(entry)
+
+    return results
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)

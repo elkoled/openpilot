@@ -88,7 +88,29 @@ class ServiceMonitor:
         "exit_code": getattr(proc.proc, "exitcode", None),
         "shutting_down": getattr(proc, "shutting_down", False),
         "enabled": getattr(proc, "enabled", False),
+        "type": proc.__class__.__name__,
+        "supports_stacktrace": getattr(proc, "supports_stacktrace", False),
+        "sigkill": getattr(proc, "sigkill", False),
+        "daemon": getattr(proc, "daemon", False),
+        "watchdog_max_dt": getattr(proc, "watchdog_max_dt", None),
+        "start_count": getattr(proc, "start_count", None),
+        "last_start_time": getattr(proc, "last_start_time", None),
+        "last_start_monotonic": getattr(proc, "last_start_monotonic", None),
+        "last_should_run": getattr(proc, "last_should_run", None),
+        "last_ensure_started": getattr(proc, "last_ensure_started", None),
+        "last_ensure_time": getattr(proc, "last_ensure_time", None),
+        "last_watchdog_checked": getattr(proc, "last_watchdog_checked", None),
+        "last_stop_signal": getattr(proc, "last_stop_signal", None),
+        "last_stop_signal_time": getattr(proc, "last_stop_signal_time", None),
       }
+      if hasattr(proc, "module"):
+        state["module"] = proc.module
+      if hasattr(proc, "cmdline"):
+        state["cmdline"] = proc.cmdline
+      if hasattr(proc, "param_name"):
+        state["param_name"] = proc.param_name
+      if hasattr(proc, "daemon_pid"):
+        state["daemon_pid"] = getattr(proc, "daemon_pid", None)
       snapshot.append(state)
 
     serialized = json.dumps(snapshot, sort_keys=True, default=str)

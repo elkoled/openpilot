@@ -202,3 +202,10 @@ if os.path.exists("../../third_party/copyparty/copyparty-sfx.py"):
   procs += [NativeProcess("copyparty-sfx", "third_party/copyparty", ["./copyparty-sfx.py", *copyparty_args], and_(only_offroad, use_copyparty))]
 
 managed_processes = {p.name: p for p in procs}
+
+# Processes launched through PythonProcess install signal handlers that allow the
+# service monitor to request stack traces without impacting control flow.  The
+# selfdrive daemon uses this exported set to limit stack trace requests to
+# processes that support it when a communication issue is detected.
+STACKTRACE_CAPABLE_PROCESSES = tuple(p.name for p in procs if isinstance(p, PythonProcess))
+

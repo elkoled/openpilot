@@ -134,6 +134,8 @@ class ManagerProcess(ABC):
     else:
       self.watchdog_seen = True
 
+    setattr(self, "last_watchdog_checked", time.time())
+
   def stop(self, retry: bool = True, block: bool = True, sig: signal.Signals = None) -> int | None:
     if self.proc is None:
       return None
@@ -190,6 +192,34 @@ class ManagerProcess(ABC):
 
     cloudlog.info(f"sending signal {sig} to {self.name}")
     os.kill(self.proc.pid, sig)
+    try:
+      signal_name = signal.Signals(sig).name
+    except ValueError:
+      signal_name = str(sig)
+    setattr(self, "last_stop_signal", signal_name)
+    setattr(self, "last_stop_signal_time", time.time())
+
+  def _request_stacktrace(self, *, reason: str) -> None:
+    if not getattr(self, "supports_stacktrace", False):
+      return
+
+    if self.proc is None or self.proc.pid is None:
+      return
+
+    try:
+      os.kill(self.proc.pid, signal.SIGUSR1)
+    except ProcessLookupError:
+      return
+    except Exception:
+      cloudlog.exception(f"failed to request stacktrace from {self.name}")
+    else:
+      service_monitor.log_stacktrace_request(
+        name=self.name,
+        pid=self.proc.pid,
+        signal=signal.Signals(signal.SIGUSR1).name,
+        reason=reason,
+      )
+      time.sleep(0.1)
 
   def _request_stacktrace(self, *, reason: str) -> None:
     if not getattr(self, "supports_stacktrace", False):
@@ -252,6 +282,9 @@ class NativeProcess(ManagerProcess):
     self.proc.start()
     self.watchdog_seen = False
     self.shutting_down = False
+    setattr(self, "start_count", getattr(self, "start_count", 0) + 1)
+    setattr(self, "last_start_time", time.time())
+    setattr(self, "last_start_monotonic", time.monotonic())
     service_monitor.log_process_start(name=self.name, pid=self.proc.pid)
 
 
@@ -288,6 +321,9 @@ class PythonProcess(ManagerProcess):
     self.proc.start()
     self.watchdog_seen = False
     self.shutting_down = False
+    setattr(self, "start_count", getattr(self, "start_count", 0) + 1)
+    setattr(self, "last_start_time", time.time())
+    setattr(self, "last_start_monotonic", time.monotonic())
     service_monitor.log_process_start(name=self.name, pid=self.proc.pid)
 
 
@@ -332,6 +368,10 @@ class DaemonProcess(ManagerProcess):
                                preexec_fn=os.setpgrp)
 
     self.params.put(self.param_name, proc.pid)
+    setattr(self, "start_count", getattr(self, "start_count", 0) + 1)
+    setattr(self, "last_start_time", time.time())
+    setattr(self, "last_start_monotonic", time.monotonic())
+    setattr(self, "daemon_pid", proc.pid)
     service_monitor.log_process_start(name=self.name, pid=proc.pid)
 
   def stop(self, retry=True, block=True, sig=None) -> None:
@@ -345,7 +385,11 @@ def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params=None
 
   running = []
   for p in procs:
-    if p.enabled and p.name not in not_run and p.should_run(started, params, CP):
+    should_run = p.enabled and p.name not in not_run and p.should_run(started, params, CP)
+    setattr(p, "last_should_run", should_run)
+    setattr(p, "last_ensure_started", started)
+    setattr(p, "last_ensure_time", time.time())
+    if should_run:
       running.append(p)
     else:
       p.stop(block=False)
