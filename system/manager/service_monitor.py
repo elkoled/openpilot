@@ -11,7 +11,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping, Sequence
 
 from openpilot.system.hardware.hw import Paths
 
@@ -118,6 +118,12 @@ class ServiceMonitor:
   def log_process_exception(self, *, name: str, stacktrace: str) -> None:
     self.log_event("process_exception", name=name, stacktrace=stacktrace)
 
+  def log_process_stacktrace(self, *, name: str, trigger: str, stacktrace: str) -> None:
+    self.log_event("process_stacktrace", name=name, trigger=trigger, stacktrace=stacktrace)
+
+  def log_stacktrace_request(self, *, name: str, pid: int, signal: str, reason: str | None = None) -> None:
+    self.log_event("process_stacktrace_requested", name=name, pid=pid, signal=signal, reason=reason)
+
   def log_watchdog_timeout(self, *, name: str, elapsed: float, exit_code: int | None) -> None:
     self.log_event("watchdog_timeout", name=name, elapsed=elapsed, exit_code=exit_code)
 
@@ -132,6 +138,46 @@ class ServiceMonitor:
 
   def log_exception(self, context: str) -> None:
     self._logger.exception("%s", context)
+
+  def log_comm_issue(self,
+                     *,
+                     reason: str,
+                     status: Mapping[str, Sequence[str]],
+                     frame: int,
+                     recv_frame: Mapping[str, int],
+                     frame_age: Mapping[str, int | None],
+                     valid: Mapping[str, bool],
+                     alive: Mapping[str, bool],
+                     freq_ok: Mapping[str, bool],
+                     updated: Mapping[str, bool],
+                     manager_processes: Sequence[Mapping[str, object]],
+                     events: Sequence[Mapping[str, object]],
+                     not_running: Sequence[str],
+                     ignored_processes: Sequence[str],
+                     ratekeeper: Mapping[str, object],
+                     extra: Mapping[str, object] | None = None) -> None:
+    payload: dict[str, object] = {
+      "reason": reason,
+      "status": {k: sorted(v) for k, v in status.items()},
+      "frame": frame,
+      "recv_frame": dict(sorted(recv_frame.items())),
+      "frame_age": dict(sorted(frame_age.items())),
+      "valid": dict(sorted(valid.items())),
+      "alive": dict(sorted(alive.items())),
+      "freq_ok": dict(sorted(freq_ok.items())),
+      "updated": dict(sorted(updated.items())),
+      "manager_processes": list(manager_processes),
+      "events": list(events),
+      "not_running": sorted(not_running),
+      "ignored_processes": sorted(ignored_processes),
+      "ratekeeper": dict(ratekeeper),
+    }
+
+    if extra:
+      payload["extra"] = dict(extra)
+
+    serialized = json.dumps(payload, sort_keys=True, default=str)
+    self._logger.warning("comm_issue_detected | %s", serialized)
 
 
 service_monitor = ServiceMonitor()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import faulthandler
 import importlib
+import io
 import os
 import signal
 import struct
@@ -27,6 +29,17 @@ ENABLE_WATCHDOG = os.getenv("NO_WATCHDOG") is None
 
 def launcher(proc: str, name: str) -> None:
   try:
+    def _handle_stacktrace_request(signum, frame):
+      buf = io.StringIO()
+      faulthandler.dump_traceback(file=buf, all_threads=True)
+      try:
+        trigger = signal.Signals(signum).name
+      except ValueError:
+        trigger = str(signum)
+      service_monitor.log_process_stacktrace(name=name, trigger=trigger, stacktrace=buf.getvalue())
+
+    signal.signal(signal.SIGUSR1, _handle_stacktrace_request)
+
     # import the process
     mod = importlib.import_module(proc)
 
@@ -76,6 +89,7 @@ class ManagerProcess(ABC):
   proc: Process | None = None
   enabled = True
   name = ""
+  supports_stacktrace = False
 
   last_watchdog_time = 0
   watchdog_max_dt: int | None = None
@@ -129,6 +143,8 @@ class ManagerProcess(ABC):
         cloudlog.info(f"killing {self.name}")
         if sig is None:
           sig = signal.SIGKILL if self.sigkill else signal.SIGINT
+        if sig == signal.SIGKILL:
+          self._request_stacktrace(reason="sigkill_initial")
         self.signal(sig)
         self.shutting_down = True
 
@@ -140,6 +156,7 @@ class ManagerProcess(ABC):
       # If process failed to die send SIGKILL
       if self.proc.exitcode is None and retry:
         cloudlog.info(f"killing {self.name} with SIGKILL")
+        self._request_stacktrace(reason="sigkill_retry")
         self.signal(signal.SIGKILL)
         self.proc.join()
 
@@ -173,6 +190,28 @@ class ManagerProcess(ABC):
 
     cloudlog.info(f"sending signal {sig} to {self.name}")
     os.kill(self.proc.pid, sig)
+
+  def _request_stacktrace(self, *, reason: str) -> None:
+    if not getattr(self, "supports_stacktrace", False):
+      return
+
+    if self.proc is None or self.proc.pid is None:
+      return
+
+    try:
+      os.kill(self.proc.pid, signal.SIGUSR1)
+    except ProcessLookupError:
+      return
+    except Exception:
+      cloudlog.exception(f"failed to request stacktrace from {self.name}")
+    else:
+      service_monitor.log_stacktrace_request(
+        name=self.name,
+        pid=self.proc.pid,
+        signal=signal.Signals(signal.SIGUSR1).name,
+        reason=reason,
+      )
+      time.sleep(0.1)
 
   def get_process_state_msg(self):
     state = log.ManagerState.ProcessState.new_message()
@@ -225,6 +264,7 @@ class PythonProcess(ManagerProcess):
     self.sigkill = sigkill
     self.watchdog_max_dt = watchdog_max_dt
     self.launcher = launcher
+    self.supports_stacktrace = True
 
   def prepare(self) -> None:
     if self.enabled:

@@ -21,6 +21,7 @@ from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
+from openpilot.system.manager.service_monitor import service_monitor
 from openpilot.system.version import get_build_metadata
 
 from openpilot.sunnypilot.mads.mads import ModularAssistiveDrivingSystem
@@ -379,6 +380,82 @@ class SelfdriveD(CruiseHelper):
       if logs != self.logged_comm_issue:
         cloudlog.event("commIssue", error=True, **logs)
         self.logged_comm_issue = logs
+
+      if logs['not_alive']:
+        reason = 'not_alive'
+      elif logs['not_freq_ok']:
+        reason = 'not_freq_ok'
+      elif logs['invalid']:
+        reason = 'invalid'
+      else:
+        reason = 'unknown'
+
+      frame = int(self.sm.frame)
+      recv_frame = {}
+      frame_age = {}
+      for name, frame_id in self.sm.recv_frame.items():
+        try:
+          numeric_id = int(frame_id)
+        except (TypeError, ValueError):
+          numeric_id = -1
+        recv_frame[name] = numeric_id
+        frame_age[name] = frame - numeric_id if numeric_id >= 0 else None
+
+      manager_processes = []
+      if self.sm.recv_frame['managerState']:
+        for proc_state in self.sm['managerState'].processes:
+          manager_processes.append({
+            'name': proc_state.name,
+            'running': bool(proc_state.running),
+            'shouldBeRunning': bool(proc_state.shouldBeRunning),
+            'pid': int(proc_state.pid),
+            'exitCode': int(proc_state.exitCode),
+          })
+
+      events_mapping = self.events.get_events_mapping()
+      seen_event_names = set()
+      event_details = []
+      for event_raw in self.events.names:
+        event_name = self.events.get_event_name(event_raw)
+        if event_name in seen_event_names:
+          continue
+        seen_event_names.add(event_name)
+        types = sorted(events_mapping.get(event_raw, {}).keys())
+        event_details.append({'name': event_name, 'types': types})
+
+      ratekeeper_state = {
+        'frame': int(self.rk.frame),
+        'lagging': bool(self.rk.lagging),
+        'remaining': float(self.rk.remaining),
+      }
+      try:
+        ratekeeper_state['avg_dt'] = float(self.rk.avg_dt.get_average())
+      except Exception:
+        pass
+
+      service_monitor.log_comm_issue(
+        reason=reason,
+        status=logs,
+        frame=frame,
+        recv_frame=recv_frame,
+        frame_age=frame_age,
+        valid={name: bool(valid) for name, valid in self.sm.valid.items()},
+        alive={name: bool(alive) for name, alive in self.sm.alive.items()},
+        freq_ok={name: bool(freq_ok) for name, freq_ok in self.sm.freq_ok.items()},
+        updated={name: bool(updated) for name, updated in self.sm.updated.items()},
+        manager_processes=manager_processes,
+        events=event_details,
+        not_running=sorted(not_running),
+        ignored_processes=sorted(self.ignored_processes),
+        ratekeeper=ratekeeper_state,
+        extra={
+          'started': bool(started),
+          'rk_lagging': bool(self.rk.lagging),
+          'camera_packets': list(self.camera_packets),
+          'sensor_packets': list(self.sensor_packets),
+          'gps_packets': list(self.gps_packets),
+        },
+      )
     else:
       self.logged_comm_issue = None
 
