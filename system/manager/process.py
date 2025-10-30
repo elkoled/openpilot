@@ -9,6 +9,7 @@ import struct
 import time
 import subprocess
 import traceback
+import tempfile
 from collections.abc import Callable, ValuesView
 from abc import ABC, abstractmethod
 from multiprocessing import Process
@@ -30,13 +31,20 @@ ENABLE_WATCHDOG = os.getenv("NO_WATCHDOG") is None
 def launcher(proc: str, name: str) -> None:
   try:
     def _handle_stacktrace_request(signum, frame):
-      buf = io.StringIO()
-      faulthandler.dump_traceback(file=buf, all_threads=True)
+      stacktrace = None
+      try:
+        with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+") as tmp:
+          faulthandler.dump_traceback(file=tmp, all_threads=True)
+          tmp.seek(0)
+          stacktrace = tmp.read()
+      except Exception:
+        stacktrace = "".join(traceback.format_stack())
+
       try:
         trigger = signal.Signals(signum).name
       except ValueError:
         trigger = str(signum)
-      service_monitor.log_process_stacktrace(name=name, trigger=trigger, stacktrace=buf.getvalue())
+      service_monitor.log_process_stacktrace(name=name, trigger=trigger, stacktrace=stacktrace or "")
 
     signal.signal(signal.SIGUSR1, _handle_stacktrace_request)
 
@@ -198,28 +206,6 @@ class ManagerProcess(ABC):
       signal_name = str(sig)
     setattr(self, "last_stop_signal", signal_name)
     setattr(self, "last_stop_signal_time", time.time())
-
-  def _request_stacktrace(self, *, reason: str) -> None:
-    if not getattr(self, "supports_stacktrace", False):
-      return
-
-    if self.proc is None or self.proc.pid is None:
-      return
-
-    try:
-      os.kill(self.proc.pid, signal.SIGUSR1)
-    except ProcessLookupError:
-      return
-    except Exception:
-      cloudlog.exception(f"failed to request stacktrace from {self.name}")
-    else:
-      service_monitor.log_stacktrace_request(
-        name=self.name,
-        pid=self.proc.pid,
-        signal=signal.Signals(signal.SIGUSR1).name,
-        reason=reason,
-      )
-      time.sleep(0.1)
 
   def _request_stacktrace(self, *, reason: str) -> None:
     if not getattr(self, "supports_stacktrace", False):
