@@ -1,7 +1,4 @@
-# PSA Route Tests - runs on every push
-#
-# SETUP: Enable Actions in your fork's Settings > Actions > General
-#
+# PSA Route Tests - uses comma's Docker approach
 name: PSA Route Tests
 
 on:
@@ -9,41 +6,40 @@ on:
     branches:
       - psa-sunny
       - master-new
-      # Add branches here
-
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  BASE_IMAGE: ghcr.io/commaai/openpilot-base:latest
+  RUN: docker run --shm-size 2G -v $PWD:/tmp/openpilot -w /tmp/openpilot -e CI=1 -e FILEREADER_CACHE=1 -e PYTHONPATH=/tmp/openpilot -v ${{ github.workspace }}/.ci_cache/comma_download_cache:/tmp/comma_download_cache
+
 jobs:
   test:
-    name: Test ${{ matrix.platform }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [PSA_PEUGEOT_208, PSA_PEUGEOT_508]
+    name: Test PSA Routes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cache routes
+        uses: actions/cache@v4
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          path: .ci_cache/comma_download_cache
+          key: psa-routes-${{ hashFiles('.github/test_routes.yaml') }}
 
-      - name: Install dependencies
+      - name: Pull Docker image
+        run: docker pull $BASE_IMAGE
+
+      - name: Build and test
         run: |
-          pip install pytest pyyaml
-          pip install -e ./opendbc_repo
-          pip install -r requirements.txt || true
-
-      - name: Run tests
-        run: pytest .github/test_psa_routes.py -v -k "${{ matrix.platform }}" --tb=short
+          ${{ env.RUN }} $BASE_IMAGE /bin/bash -c "\
+            scons -j\$(nproc) common/ cereal/ selfdrive/pandad/ msgq_repo/ opendbc_repo/ && \
+            cd .github && \
+            python -m pytest test_psa_routes.py -v --tb=short && \
+            chmod -R 777 /tmp/comma_download_cache"

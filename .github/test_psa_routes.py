@@ -41,7 +41,8 @@ CONSECUTIVE_ERROR_THRESHOLD = 5
 
 def load_test_routes():
     """Load routes from YAML and generate pytest parameters."""
-    config_path = REPO_ROOT / ".github" / "test_routes.yaml"
+    # test_routes.yaml is in same directory as this file
+    config_path = Path(__file__).parent / "test_routes.yaml"
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
