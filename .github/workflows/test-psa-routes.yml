@@ -1,0 +1,49 @@
+# PSA Route Tests - runs on every push
+#
+# SETUP: Enable Actions in your fork's Settings > Actions > General
+#
+name: PSA Route Tests
+
+on:
+  push:
+    branches:
+      - psa-sunny
+      - master-new
+      # Add branches here
+
+  workflow_dispatch:  # Manual trigger
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [PSA_PEUGEOT_208, PSA_PEUGEOT_508]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pyyaml
+          pip install -e ./opendbc_repo
+          pip install -r requirements.txt || true
+
+      - name: Run tests
+        run: pytest .github/test_psa_routes.py -v -k "${{ matrix.platform }}" --tb=short

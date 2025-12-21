@@ -1,0 +1,10 @@
+# Test Routes Configuration
+# Only routes confirmed in openpilotci (from opendbc/car/tests/routes.py)
+
+PSA_PEUGEOT_208:
+  - route: "6a7075a4fdd765ee/0000004e--1f612006dd"
+    description: "Peugeot e208 2021 ACC"
+
+PSA_PEUGEOT_508:
+  - route: "4cef1f7eba322b25/00000000--dee7de3f20"
+    description: "Peugeot 508 2020"
