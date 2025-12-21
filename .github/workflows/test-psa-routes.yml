@@ -39,7 +39,8 @@ jobs:
       - name: Build and test
         run: |
           ${{ env.RUN }} $BASE_IMAGE /bin/bash -c "\
-            scons -j\$(nproc) common/ cereal/ selfdrive/pandad/ msgq_repo/ opendbc_repo/ && \
+            git config --global --add safe.directory '*' && \
+            scons -j\$(nproc) common/params_pyx.so cereal/ msgq_repo/ opendbc_repo/ && \
             cd .github && \
             python -m pytest test_psa_routes.py -v --tb=short && \
             chmod -R 777 /tmp/comma_download_cache"
