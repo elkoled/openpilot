@@ -1,0 +1,79 @@
+# Steering Accuracy Tests - compares angular steering performance between routes
+name: Steering Accuracy Tests
+
+on:
+  push:
+    branches:
+      - psa-sunny
+      - master-new
+  workflow_dispatch:
+    inputs:
+      before_route:
+        description: 'Before route (baseline)'
+        required: false
+        default: '6a7075a4fdd765ee/000000b2--f0e8f72661'
+      after_route:
+        description: 'After route (to compare)'
+        required: false
+        default: '6a7075a4fdd765ee/000000b1--1316ac76e2'
+      segments:
+        description: 'Segment range (e.g., 7-13)'
+        required: false
+        default: '7-13'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_IMAGE: ghcr.io/commaai/openpilot-base:latest
+  RUN: docker run --shm-size 2G -v $PWD:/tmp/openpilot -w /tmp/openpilot -e CI=1 -e FILEREADER_CACHE=1 -e PYTHONPATH=/tmp/openpilot -v ${{ github.workspace }}/.ci_cache/comma_download_cache:/tmp/comma_download_cache
+
+jobs:
+  test:
+    name: Steering Accuracy Analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Cache routes
+        uses: actions/cache@v4
+        with:
+          path: .ci_cache/comma_download_cache
+          key: steering-accuracy-routes-v1
+
+      - name: Pull Docker image
+        run: docker pull $BASE_IMAGE
+
+      - name: Build dependencies
+        run: |
+          ${{ env.RUN }} $BASE_IMAGE /bin/bash -c "\
+            git config --global --add safe.directory '*' && \
+            scons -j\$(nproc) \
+              common/params_pyx.so \
+              cereal/ \
+              msgq_repo/msgq/ipc_pyx.so \
+              msgq_repo/msgq/visionipc/visionipc_pyx.so \
+              selfdrive/pandad/pandad_api_impl.so \
+              opendbc_repo/opendbc/dbc/ \
+              opendbc_repo/opendbc/car/"
+
+      - name: Run steering accuracy test
+        run: |
+          BEFORE="${{ github.event.inputs.before_route || '6a7075a4fdd765ee/000000b2--f0e8f72661' }}"
+          AFTER="${{ github.event.inputs.after_route || '6a7075a4fdd765ee/000000b1--1316ac76e2' }}"
+          SEGMENTS="${{ github.event.inputs.segments || '7-13' }}"
+
+          ${{ env.RUN }} $BASE_IMAGE /bin/bash -c "\
+            cd .github && \
+            python test_steering_accuracy.py \
+              --before $BEFORE \
+              --after $AFTER \
+              --segments $SEGMENTS \
+              --cache && \
+            chmod -R 777 /tmp/comma_download_cache"
