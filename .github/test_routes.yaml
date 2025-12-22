@@ -4,7 +4,7 @@
 PSA_PEUGEOT_208:
   - route: "6a7075a4fdd765ee/0000004e--1f612006dd"
     description: "Peugeot e208 2021 ACC"
-  - route: "d6269483d00d8b66/0000001c--03fb9e7be9"
+  - route: "d6269483d00d8b66/00000053--6c2d0bd1fb"
     description: "Peugeot 2008 2020 ACC"
 
 PSA_PEUGEOT_508:
