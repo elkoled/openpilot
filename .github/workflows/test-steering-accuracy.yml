@@ -1,5 +1,5 @@
-# Steering Accuracy Tests - compares angular steering performance between routes
-name: Steering Accuracy Tests
+# Steering Accuracy Tests - measures how well the car follows steering commands
+name: Steering Accuracy
 
 on:
   push:
@@ -7,19 +7,6 @@ on:
       - psa-sunny
       - master-new
   workflow_dispatch:
-    inputs:
-      before_route:
-        description: 'Before route (baseline)'
-        required: false
-        default: '6a7075a4fdd765ee/000000b2--f0e8f72661'
-      after_route:
-        description: 'After route (to compare)'
-        required: false
-        default: '6a7075a4fdd765ee/000000b1--1316ac76e2'
-      segments:
-        description: 'Segment range (e.g., 7-13)'
-        required: false
-        default: '7-13'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +18,7 @@ env:
 
 jobs:
   test:
-    name: Steering Accuracy Analysis
+    name: Steering Accuracy
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -45,12 +32,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci_cache/comma_download_cache
-          key: steering-accuracy-routes-v1
+          key: steering-accuracy-v2
 
       - name: Pull Docker image
         run: docker pull $BASE_IMAGE
 
-      - name: Build dependencies
+      - name: Build
         run: |
           ${{ env.RUN }} $BASE_IMAGE /bin/bash -c "\
             git config --global --add safe.directory '*' && \
@@ -63,17 +50,13 @@ jobs:
               opendbc_repo/opendbc/dbc/ \
               opendbc_repo/opendbc/car/"
 
-      - name: Run steering accuracy test
+      - name: Test steering accuracy
         run: |
-          BEFORE="${{ github.event.inputs.before_route || '6a7075a4fdd765ee/000000b2--f0e8f72661' }}"
-          AFTER="${{ github.event.inputs.after_route || '6a7075a4fdd765ee/000000b1--1316ac76e2' }}"
-          SEGMENTS="${{ github.event.inputs.segments || '7-13' }}"
-
           ${{ env.RUN }} $BASE_IMAGE /bin/bash -c "\
             cd .github && \
-            python test_steering_accuracy.py \
-              --before $BEFORE \
-              --after $AFTER \
-              --segments $SEGMENTS \
-              --cache && \
+            echo '=== Peugeot e208 2021 ===' && \
+            python test_steering_accuracy.py 6a7075a4fdd765ee/0000004e--1f612006dd --cache && \
+            echo && \
+            echo '=== Peugeot 2008 2020 ===' && \
+            python test_steering_accuracy.py d6269483d00d8b66/00000053--6c2d0bd1fb --cache && \
             chmod -R 777 /tmp/comma_download_cache"
