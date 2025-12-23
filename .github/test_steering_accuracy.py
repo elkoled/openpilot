@@ -40,8 +40,14 @@ def load_segment(route: str, seg: int, retries: int = 2) -> list:
             return list(lr)
         except Exception as e:
             err_str = str(e).lower()
-            # Normal end of route - no retry needed
-            if "not found" in err_str or "unavailable" in err_str:
+            # Check if this is a genuine "not found" vs a transient network error
+            # LogsUnavailable can be thrown for both cases - inspect nested exception
+            is_not_found = (
+                "indexerror" in err_str or  # segment doesn't exist
+                "segment range is not valid" in err_str or  # invalid segment
+                ("not found" in err_str and "connectionerror" not in err_str and "maxretry" not in err_str)
+            )
+            if is_not_found:
                 return []
             # Transient error - retry
             if attempt < retries:
