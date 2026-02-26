@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import subprocess
+import time
 from pathlib import Path
 
 # NOTE: Do NOT import anything here that needs be built (e.g. params)
@@ -49,7 +50,10 @@ def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
         prefix = b'progress: '
         if line.startswith(prefix):
           i = int(line[len(prefix):])
-          spinner.update_progress(MAX_BUILD_PROGRESS * min(1., i / TOTAL_SCONS_NODES), 100.)
+          temp = int(open('/sys/class/thermal/thermal_zone0/temp').read()) // 1000
+          spinner.update(f"Building {int(100 * min(1., i / TOTAL_SCONS_NODES))}% {temp}C")
+          with open('/tmp/build_temps.txt', 'a') as tf:
+            tf.write(f"{time.time():.1f} {temp}\n")
         elif len(line):
           compile_output.append(line)
           print(line.decode('utf8', 'replace'))
