@@ -100,6 +100,7 @@ def main():
   complete_cnt = 0
   display_holdoff = 0
   prev_text = ''
+  press_frames = 0
 
   while True:
     sm.update()
@@ -116,13 +117,19 @@ def main():
     v_ego = max(sm['carState'].vEgo, 0)
     curvature = sm['controlsState'].desiredCurvature
 
+    # Curvature-based EPS racks briefly spike the column torque above
+    # STEER_DRIVER_ALLOWANCE at maneuver onset; require sustained press
+    # (~150 ms) to distinguish a real driver hold from that transient.
+    press_frames = press_frames + 1 if sm['carState'].steeringPressed else 0
+    sustained_press = press_frames >= 3
+
     if complete_cnt > 0:
       complete_cnt -= 1
       alert_msg.alertDebug.alertText1 = 'Completed'
       alert_msg.alertDebug.alertText2 = maneuver.description
     elif maneuver is not None:
       # reset maneuver on steering override or out of range speed
-      if sm['carState'].steeringPressed or (maneuver.active and abs(v_ego - maneuver.initial_speed) > MAX_SPEED_DEV):
+      if sustained_press or (maneuver.active and abs(v_ego - maneuver.initial_speed) > MAX_SPEED_DEV):
         maneuver.reset()
 
       roll = sm['carControl'].orientationNED[0] if len(sm['carControl'].orientationNED) == 3 else 0.0
