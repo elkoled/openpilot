@@ -103,7 +103,7 @@ class Controls(ControlsExt):
       self.force_rhd_for_bsm = self.params.get_bool("ForceRHDForBSM")
       self.enable_long_comfort_mode = self.params.get_bool("EnableLongComfortMode")
       self.disable_car_steer_alerts = self.params.get_bool("DisableCarSteerAlerts")
-  
+
   def state_control(self):
     CS = self.sm['carState']
 
@@ -208,7 +208,7 @@ class Controls(ControlsExt):
     # Only calibrated (car) frame is relevant for the carcontroller
     CC.currentCurvature = self.curvature
     CC.rollCompensation = self.roll_compensation
-    
+
     if self.calibrated_pose is not None:
       CC.orientationNED = self.calibrated_pose.orientation.xyz.tolist()
       CC.angularVelocity = self.calibrated_pose.angular_velocity.xyz.tolist()
@@ -230,6 +230,7 @@ class Controls(ControlsExt):
     hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.leadFollowTime = get_T_FOLLOW(hudControl.leadDistanceBars - 1)
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
+    hudControl.audibleAlert = self.sm['selfdriveState'].alertSound
 
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True
@@ -262,8 +263,7 @@ class Controls(ControlsExt):
     cs.upAccelCmd = float(self.LoC.pid.p)
     cs.uiAccelCmd = float(self.LoC.pid.i)
     cs.ufAccelCmd = float(self.LoC.pid.f)
-    cs.forceDecel = bool((self.sm['driverMonitoringState'].awarenessStatus < 0.) or
-                         (self.sm['selfdriveState'].state == State.softDisabling))
+    cs.forceDecel = False
 
     lat_tuning = self.CP.lateralTuning.which()
     if (self.CP.steerControlType == car.CarParams.SteerControlType.angle or
