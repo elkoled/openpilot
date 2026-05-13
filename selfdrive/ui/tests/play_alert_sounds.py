@@ -1,43 +1,83 @@
 #!/usr/bin/env python3
-# Push to the comma device, stop the openpilot stack (keep soundd alive or run it
-# manually), then run this to cycle every AudibleAlert through the real soundd
-# pipeline via cereal messaging.
+# Push to the comma device, run directly — no openpilot stack, no msgq needed.
+# Drives the real Soundd.get_sound_data() (which contains the loop-wrap fix)
+# through sounddevice, bypassing cereal messaging.
 #
 #   scp selfdrive/ui/tests/play_alert_sounds.py comma@<device>:/data/openpilot/
 #   ssh comma@<device>
-#   tmux kill-session -t comma                          # stop the stack
-#   cd /data/openpilot && ./selfdrive/ui/soundd.py &    # soundd alone
-#   python3 play_alert_sounds.py                        # cycle all sounds (5s each)
-#   python3 play_alert_sounds.py laneChange             # single sound, loops until Ctrl-C
-#   python3 play_alert_sounds.py laneChange engage      # subset (5s each)
-#   python3 play_alert_sounds.py --seconds 30           # cycle all, 30s each (good for hearing loop glitches)
+#   # stop the openpilot stack first so it doesn't grab the audio device
+#   tmux kill-session -t comma
+#   cd /data/openpilot
+#   python3 selfdrive/ui/tests/play_alert_sounds.py                # cycle all, 5s each
+#   python3 selfdrive/ui/tests/play_alert_sounds.py laneChange      # one sound, loops until Ctrl-C
+#   python3 selfdrive/ui/tests/play_alert_sounds.py --seconds 30    # cycle all, 30s each
+#   python3 selfdrive/ui/tests/play_alert_sounds.py promptDistracted warningSoft --seconds 20
 
 import sys
 import time
+import wave
 
-from cereal import messaging, car
+import numpy as np
+import sounddevice as sd
 
-AA = car.CarControl.HUDControl.AudibleAlert
+# Match soundd.py's loader exactly — no cereal/messaging dependency.
+SAMPLE_RATE = 48000
+SAMPLE_BUFFER = 4096
+SOUNDS_DIR = "selfdrive/assets/sounds"
 
-ALL = ["engage", "disengage", "refuse", "prompt", "promptRepeat",
-       "promptDistracted", "warningSoft", "warningImmediate", "laneChange"]
+# (filename, play_count) — keep in sync with soundd.sound_list
+SOUNDS = {
+  "engage":            ("engage.wav",            1),
+  "disengage":         ("disengage.wav",         1),
+  "refuse":            ("refuse.wav",            1),
+  "prompt":            ("prompt.wav",            1),
+  "promptRepeat":      ("prompt.wav",            None),
+  "promptDistracted":  ("prompt_distracted.wav", None),
+  "warningSoft":       ("warning_soft.wav",      None),
+  "warningImmediate":  ("warning_immediate.wav", None),
+  "laneChange":        ("lane_change.wav",       1),
+}
 
 
-def play(name: str, pm: messaging.PubMaster, seconds: float | None) -> None:
-  """Publish alertSound=<name> until `seconds` elapses, or forever if seconds is None."""
-  if not hasattr(AA, name):
-    print(f"  !! {name} not in cereal schema — stale build on device?")
-    return
-  forever = seconds is None
-  print(f"  → {name}" + ("  (Ctrl-C to stop)" if forever else f"  ({seconds:.0f}s)"))
-  msg = messaging.new_message("selfdriveState")
-  msg.selfdriveState.alertSound = getattr(AA, name)
-  msg.selfdriveState.alertText1 = name
-  msg.selfdriveState.enabled = True
-  end = None if forever else time.monotonic() + seconds
-  while forever or time.monotonic() < end:
-    pm.send("selfdriveState", msg)
-    time.sleep(0.05)
+def load(filename: str) -> np.ndarray:
+  with wave.open(f"{SOUNDS_DIR}/{filename}", "r") as w:
+    assert w.getnchannels() == 1, f"{filename}: not mono"
+    assert w.getsampwidth() == 2, f"{filename}: not 16-bit"
+    assert w.getframerate() == SAMPLE_RATE, f"{filename}: not 48kHz"
+    return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / (2 ** 16 / 2)
+
+
+class Player:
+  """Replicates Soundd.get_sound_data with the loop-wrap fix."""
+
+  def __init__(self):
+    self.loaded = {name: load(f) for name, (f, _) in SOUNDS.items()}
+    self.current_alert = None
+    self.current_sound_frame = 0
+    self.num_loops = 1
+
+  def set(self, name: str | None):
+    self.current_alert = name
+    self.current_sound_frame = 0
+    self.num_loops = SOUNDS[name][1] if name else 1
+
+  def callback(self, outdata, frames, _time, _status):
+    out = np.zeros(frames, dtype=np.float32)
+    if self.current_alert is not None:
+      data = self.loaded[self.current_alert]
+      n = len(data)
+      written = 0
+      while written < frames:
+        loops = self.current_sound_frame // n
+        if self.num_loops is not None and loops >= self.num_loops:
+          break
+        cur = self.current_sound_frame % n
+        avail = n - cur
+        ftw = min(avail, frames - written)
+        out[written:written + ftw] = data[cur:cur + ftw]
+        written += ftw
+        self.current_sound_frame += ftw
+    outdata[:, 0] = out
 
 
 def main():
@@ -48,27 +88,36 @@ def main():
     seconds = float(args[i + 1])
     args = args[:i] + args[i + 2:]
 
-  names = args or ALL
-  # If exactly one sound is requested, loop it forever so you can listen for glitches
-  if len(names) == 1 and seconds == 5.0 and "--seconds" not in sys.argv:
+  names = args or list(SOUNDS.keys())
+  for n in names:
+    if n not in SOUNDS:
+      print(f"!! unknown sound: {n} (known: {', '.join(SOUNDS)})")
+      return
+
+  # single sound and user didn't ask for a duration → loop forever
+  if len(names) == 1 and "--seconds" not in sys.argv:
     seconds = None
 
-  pm = messaging.PubMaster(["selfdriveState"])
-  time.sleep(0.5)  # let subscribers connect
-
+  p = Player()
+  stream = sd.OutputStream(channels=1, samplerate=SAMPLE_RATE, dtype="float32",
+                           blocksize=SAMPLE_BUFFER, callback=p.callback)
+  stream.start()
   try:
     for n in names:
-      play(n, pm, seconds)
-      # silence between sounds
-      msg = messaging.new_message("selfdriveState")
-      msg.selfdriveState.alertSound = AA.none
-      pm.send("selfdriveState", msg)
-      time.sleep(0.8)
+      forever = seconds is None
+      print(f"→ {n}" + ("  (Ctrl-C to stop)" if forever else f"  ({seconds:.0f}s)"))
+      p.set(n)
+      end = None if forever else time.monotonic() + seconds
+      while forever or time.monotonic() < end:
+        time.sleep(0.05)
+      p.set(None)
+      time.sleep(0.5)
   except KeyboardInterrupt:
-    msg = messaging.new_message("selfdriveState")
-    msg.selfdriveState.alertSound = AA.none
-    pm.send("selfdriveState", msg)
+    p.set(None)
     print("\nstopped")
+  finally:
+    stream.stop()
+    stream.close()
 
 
 if __name__ == "__main__":
