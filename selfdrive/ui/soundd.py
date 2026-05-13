@@ -101,13 +101,16 @@ class Soundd:
     if self.current_alert != AudibleAlert.none:
       num_loops = sound_list[self.current_alert][1]
       sound_data = self.loaded_sounds[self.current_alert]
+      n = len(sound_data)
       written_frames = 0
 
-      current_sound_frame = self.current_sound_frame % len(sound_data)
-      loops = self.current_sound_frame // len(sound_data)
-
-      while written_frames < frames and (num_loops is None or loops < num_loops):
-        available_frames = sound_data.shape[0] - current_sound_frame
+      while written_frames < frames:
+        loops = self.current_sound_frame // n
+        if num_loops is not None and loops >= num_loops:
+          break
+        # wrap inside the loop so we correctly cross sound-buffer boundaries within a single callback
+        current_sound_frame = self.current_sound_frame % n
+        available_frames = n - current_sound_frame
         frames_to_write = min(available_frames, frames - written_frames)
         ret[written_frames:written_frames+frames_to_write] = sound_data[current_sound_frame:current_sound_frame+frames_to_write]
         written_frames += frames_to_write
