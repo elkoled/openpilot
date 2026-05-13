@@ -56,10 +56,17 @@ class Player:
     self.current_sound_frame = 0
     self.num_loops = 1
 
-  def set(self, name: str | None):
+  def set(self, name: str | None, force_loop: bool = True):
     self.current_alert = name
     self.current_sound_frame = 0
-    self.num_loops = SOUNDS[name][1] if name else 1
+    # For testing we always loop, even on play_count=1 sounds, so the wrap-around
+    # path is exercised repeatedly. Pass force_loop=False to honor the real count.
+    if name is None:
+      self.num_loops = 1
+    elif force_loop:
+      self.num_loops = None
+    else:
+      self.num_loops = SOUNDS[name][1]
 
   def callback(self, outdata, frames, _time, _status):
     out = np.zeros(frames, dtype=np.float32)
