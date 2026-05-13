@@ -167,7 +167,7 @@ class Soundd:
         # Always update volume, even when alert is playing
         if sm.updated['soundPressure']:
           self.spl_filter_weighted.update(sm["soundPressure"].soundPressureWeightedDb)
-          self.current_volume = self.calculate_volume(float(self.spl_filter_weighted.x))
+          self.current_volume = MAX_VOLUME  # TEMP
 
         self.get_audible_alert(sm)
 
