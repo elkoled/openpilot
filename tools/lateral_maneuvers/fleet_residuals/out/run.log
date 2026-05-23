@@ -1,0 +1,92 @@
+routes total: 339  skipped (pickle exists): 29  to process: 310
+/home/batman/.local/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3824: RuntimeWarning: Mean of empty slice
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/home/batman/.local/lib/python3.12/site-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+  [25/310]  ok=3 fail=22  cats={}  rate=0.48/s  eta=10.0min
+  [50/310]  ok=3 fail=47  cats={}  rate=0.39/s  eta=11.1min
+  [75/310]  ok=6 fail=69  cats={}  rate=0.44/s  eta=8.8min
+  [100/310]  ok=8 fail=92  cats={}  rate=0.37/s  eta=9.5min
+  [125/310]  ok=8 fail=117  cats={}  rate=0.19/s  eta=16.0min
+CANParser: 0x13d QFK_01 checksum failed: received 0x84, calculated 0x45
+CANParser: 0x13d QFK_01 checksum failed: received 0x2e, calculated 0x11
+CANParser: 0x13d QFK_01 checksum failed: received 0xb2, calculated 0x4
+CANParser: 0x13d QFK_01 checksum failed: received 0x96, calculated 0x65
+CANParser: 0x13d QFK_01 checksum failed: received 0x9e, calculated 0x0
+CANParser: 0x13d QFK_01 checksum failed: received 0x1e, calculated 0x5b
+CANParser: 0x13d QFK_01 checksum failed: received 0x15, calculated 0x9f
+CANParser: 0x13d QFK_01 checksum failed: received 0x70, calculated 0x62
+CANParser: 0x13d QFK_01 checksum failed: received 0x40, calculated 0x4b
+CANParser: 0x13d QFK_01 checksum failed: received 0xb7, calculated 0xc2
+CANParser: 0x13d QFK_01 checksum failed: received 0x3b, calculated 0x5f
+CANParser: 0x13d QFK_01 checksum failed: received 0x43, calculated 0xe
+CANParser: 0x13d QFK_01 checksum failed: received 0x7e, calculated 0x83
+CANParser: 0x13d QFK_01 checksum failed: received 0xa7, calculated 0x4a
+CANParser: 0x13d QFK_01 checksum failed: received 0xef, calculated 0x94
+CANParser: 0x13d QFK_01 checksum failed: received 0xa2, calculated 0x26
+CANParser: 0x13d QFK_01 checksum failed: received 0x17, calculated 0xbb
+CANParser: 0x13d QFK_01 checksum failed: received 0xc0, calculated 0x38
+CANParser: 0x13d QFK_01 checksum failed: received 0xdf, calculated 0x8
+CANParser: 0x13d QFK_01 checksum failed: received 0x97, calculated 0x99
+CANParser: 0x13d QFK_01 checksum failed: received 0xc6, calculated 0xe4
+CANParser: 0x13d QFK_01 checksum failed: received 0xf8, calculated 0x98
+CANParser: 0x13d QFK_01 checksum failed: received 0xde, calculated 0xfa
+CANParser: 0x13d QFK_01 checksum failed: received 0x6f, calculated 0xb9
+CANParser: 0x13d QFK_01 checksum failed: received 0x70, calculated 0x63
+CANParser: 0x13d QFK_01 checksum failed: received 0x6d, calculated 0x16
+CANParser: 0x13d QFK_01 checksum failed: received 0xa6, calculated 0xf8
+CANParser: 0x13d QFK_01 checksum failed: received 0xe5, calculated 0xb
+CANParser: 0x13d QFK_01 checksum failed: received 0xdd, calculated 0xa6
+CANParser: 0x13d QFK_01 checksum failed: received 0x27, calculated 0x4f
+CANParser: 0x13d QFK_01 checksum failed: received 0x5b, calculated 0xfd
+CANParser: 0x13d QFK_01 checksum failed: received 0x89, calculated 0x7e
+CANParser: 0x13d QFK_01 checksum failed: received 0x86, calculated 0xb2
+CANParser: 0x13d QFK_01 checksum failed: received 0xae, calculated 0x3a
+CANParser: 0x13d QFK_01 checksum failed: received 0x7, calculated 0x94
+CANParser: 0x13d QFK_01 checksum failed: received 0x4f, calculated 0x54
+CANParser: 0x13d QFK_01 checksum failed: received 0xa7, calculated 0x8e
+CANParser: 0x13d QFK_01 checksum failed: received 0xdc, calculated 0x46
+CANParser: 0x13d QFK_01 checksum failed: received 0x96, calculated 0x49
+CANParser: 0x13d QFK_01 checksum failed: received 0xf3, calculated 0xe0
+CANParser: 0x13d QFK_01 checksum failed: received 0xb, calculated 0xd1
+CANParser: 0x13d QFK_01 checksum failed: received 0x6a, calculated 0x8b
+CANParser: 0x13d QFK_01 checksum failed: received 0x95, calculated 0x6a
+CANParser: 0x13d QFK_01 checksum failed: received 0xed, calculated 0x7
+CANParser: 0x13d QFK_01 checksum failed: received 0xc6, calculated 0x4e
+CANParser: 0x13d QFK_01 checksum failed: received 0xf6, calculated 0x52
+CANParser: 0x13d QFK_01 checksum failed: received 0xfe, calculated 0xe4
+CANParser: 0x13d QFK_01 checksum failed: received 0x78, calculated 0xb5
+CANParser: 0x13d QFK_01 checksum failed: received 0x8f, calculated 0x8e
+CANParser: 0x13d QFK_01 checksum failed: received 0xdc, calculated 0x13
+CANParser: 0x13d QFK_01 checksum failed: received 0x25, calculated 0xa
+CANParser: 0x13d QFK_01 checksum failed: received 0x45, calculated 0x7f
+CANParser: 0x13d QFK_01 checksum failed: received 0x5, calculated 0x31
+CANParser: 0x13d QFK_01 checksum failed: received 0x80, calculated 0xc8
+CANParser: 0x13d QFK_01 checksum failed: received 0x4, calculated 0xde
+CANParser: 0x13d QFK_01 checksum failed: received 0xf1, calculated 0x4
+CANParser: 0x13d QFK_01 checksum failed: received 0xe7, calculated 0xaf
+CANParser: 0x13d QFK_01 checksum failed: received 0x89, calculated 0x1
+CANParser: 0x13d QFK_01 checksum failed: received 0x4b, calculated 0x8b
+CANParser: 0x13d QFK_01 checksum failed: received 0xba, calculated 0x2b
+  [150/310]  ok=11 fail=139  cats={}  rate=0.15/s  eta=18.2min
+/home/batman/.local/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3824: RuntimeWarning: Mean of empty slice
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/home/batman/.local/lib/python3.12/site-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+/home/batman/openpilot6/openpilot/tools/lib/logreader.py:117: RuntimeWarning: Corrupted events detected
+  warnings.warn("Corrupted events detected", RuntimeWarning, stacklevel=1)
+  [175/310]  ok=14 fail=161  cats={}  rate=0.12/s  eta=19.0min
+  [200/310]  ok=14 fail=186  cats={}  rate=0.13/s  eta=13.8min
+  [225/310]  ok=17 fail=208  cats={}  rate=0.15/s  eta=9.6min
+/home/batman/.local/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:3824: RuntimeWarning: Mean of empty slice
+  return _methods._mean(a, axis=axis, dtype=dtype,
+/home/batman/.local/lib/python3.12/site-packages/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+  [250/310]  ok=22 fail=228  cats={}  rate=0.16/s  eta=6.2min
+  [275/310]  ok=26 fail=249  cats={}  rate=0.17/s  eta=3.3min
+  [300/310]  ok=26 fail=274  cats={}  rate=0.19/s  eta=0.9min
+  [310/310]  ok=27 fail=283  cats={}  rate=0.19/s  eta=0.0min
+
+DONE  ok=27  extract_error=283  crash=0
+failed.log : tools/lateral_maneuvers/fleet_residuals/out/failed.log
+progress    : tools/lateral_maneuvers/fleet_residuals/out/progress.jsonl

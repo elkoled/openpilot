@@ -1,0 +1,6 @@
+# Reference routes used during pipeline development.
+# Format: dongle/route[/segment]. Missing segment becomes /a (rlogs with qlog fallback).
+# Lines starting with # are ignored.
+# Replace with your real fleet listing.
+f73c01590368ee5b/00000010--19b95d93b3
+f73c01590368ee5b/0000000e--2d623b6df3

@@ -1,0 +1,106 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Fleet residual report</title>
+<style>body{font-family:monospace} pre{white-space:pre-wrap}</style></head><body>
+<h1>Fleet residual report</h1>
+<pre>Loaded 2 route summary(ies).
+
+route                                   fingerprint         branch                     samples   R_model_yaw RMS   R_hca_qfk RMS
+----------------------------------------------------------------------------------------------------------------------------------
+f73c01590368ee5b/0000000e--2d623b6df3/  VOLKSWAGEN_ID4_MK1  comma_or_unknown              1465         +1.31e-03       +2.44e-04
+f73c01590368ee5b/00000010--19b95d93b3/  VOLKSWAGEN_ID4_MK1  comma_or_unknown                 0              n/a             n/a 
+
+Where does the residual concentrate (median RMS across routes):
+  R_model_yaw   : median RMS +1.31e-03   p10 +1.31e-03   p90 +1.31e-03   (n_routes=1)
+  R_model_qfk   : median RMS +3.48e-04   p10 +3.48e-04   p90 +3.48e-04   (n_routes=1)
+  R_hca_qfk     : median RMS +2.44e-04   p10 +2.44e-04   p90 +2.44e-04   (n_routes=1)
+  R_hca_yaw     : median RMS +1.33e-03   p10 +1.33e-03   p90 +1.33e-03   (n_routes=1)
+  R_smooth_loss : median RMS +1.95e-05   p10 +1.95e-05   p90 +1.95e-05   (n_routes=1)
+
+Dongle count: 1
+INSUFFICIENT POPULATION: cross-dongle stats need >=10 unique dongles for cluster-bootstrap CIs to be meaningful. Treat the table above as indicative only.</pre>
+<h2>Per-route detail</h2>
+<h3>f73c01590368ee5b/0000000e--2d623b6df3/a</h3>
+<pre>route_id          : f73c01590368ee5b/0000000e--2d623b6df3/a
+fingerprint       : VOLKSWAGEN_ID4_MK1    brand=volkswagen
+vin               : WVGUNPE22NP040466
+branch_inferred   : comma_or_unknown
+flags             : 3696    steer_control_type=curvatureDEPRECATED
+has_can           : True   buses(hca,qfk)=(0, 0)
+duration_s        : 1071.0    grid_samples=21419
+apply_samples     : 12533
+learn_samples     : 1465
+lat_delay_used_s  : 0.234
+speed kmh p10/50/90/99 : 15.3 / 31.0 / 89.6 / 137.7
+steer_ratio       : mean=14.167394408919298 std=0.11984285890360306  n=1465
+stiffness_factor  : mean=0.9869903136845741 std=0.008067524302749134
+angle_offset_deg  : mean=-0.36409539596460533 std=0.2887472610402612
+liveDelay         : mean=0.23376409278184482 std=0.0010148546453883638
+
+residual             n          mean           rms           mae  description
+--------------------------------------------------------------------------------------------------------------
+R_model_yaw       1248     -8.83e-05     +1.31e-03     +8.70e-04  model_raw  -  yaw_actual    (learner view, outer envelope)
+R_model_qfk       1248     -1.52e-04     +3.48e-04     +2.73e-04  model_raw  -  QFK_01 rack   (model vs rack-measured)
+R_hca_qfk         1242     -4.53e-05     +2.44e-04     +1.86e-04  HCA_03 cmd -  QFK_01 rack   (EPS execution)
+R_hca_yaw         1242     +1.16e-05     +1.33e-03     +8.99e-04  HCA_03 cmd -  yaw_actual    (EPS -> plant)
+R_smooth_loss     1248     +1.45e-08     +1.95e-05     +3.53e-06  model_raw -  actuators_curv (controller smoothing)
+
+Lag (sec) - cross-correlation of d/dt(model_raw_desired) vs d/dt(yaw_actual).
+Pre-shifted by liveDelay; reported value is the residual lag.
+  30_60kmh      : +0.150 s  (n=305, peak xcorr 0.35, zero-lag xcorr -0.24)
+  60_100kmh     : +0.050 s  (n=363, peak xcorr 0.26, zero-lag xcorr 0.16)
+  100_140kmh    : +0.050 s  (n=37, peak xcorr 0.34, zero-lag xcorr 0.22)
+
+Deadband signature (R_model_yaw signed bias in smallest 4 |curv| buckets):
+  sign_0: n=10  mean_signed_bias=+1.24e-04
+  sign_1: n=17  mean_signed_bias=-4.45e-04
+
+Asymmetry signature (pos+neg signed-bias sum per speed; nonzero => left/right mismatch):
+  20kmh   : pos_mean=-4.51e-04  neg_mean=+3.21e-04  sum=-1.30e-04  n+=338 n-=297
+  40kmh   : pos_mean=+1.82e-04  neg_mean=-5.85e-06  sum=+1.76e-04  n+=106 n-=158
+  60kmh   : pos_mean=+2.24e-04  neg_mean=-3.26e-04  sum=-1.02e-04  n+=30 n-=129
+  80kmh   : pos_mean= n/a   neg_mean=-2.75e-04  sum= n/a   n+=0 n-=126
+  100kmh  : pos_mean=+2.02e-04  neg_mean=+3.73e-05  sum=+2.39e-04  n+=2 n-=10
+  120kmh  : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  140kmh  : pos_mean= n/a   neg_mean=-4.09e-05  sum= n/a   n+=0 n-=52</pre>
+<h3>f73c01590368ee5b/00000010--19b95d93b3/a</h3>
+<pre>route_id          : f73c01590368ee5b/00000010--19b95d93b3/a
+fingerprint       : VOLKSWAGEN_ID4_MK1    brand=volkswagen
+vin               : WVGUNPE22NP040466
+branch_inferred   : comma_or_unknown
+flags             : 3696    steer_control_type=curvatureDEPRECATED
+has_can           : True   buses(hca,qfk)=(None, 0)
+duration_s        : 817.5    grid_samples=16350
+apply_samples     : 0
+learn_samples     : 0
+lat_delay_used_s  : 0.150
+steer_ratio       : mean=None std=None  n=0
+stiffness_factor  : mean=None std=None
+angle_offset_deg  : mean=None std=None
+liveDelay         : mean=None std=None
+
+residual             n          mean           rms           mae  description
+--------------------------------------------------------------------------------------------------------------
+R_model_yaw          0  (no samples)
+R_model_qfk          0  (no samples)
+R_hca_qfk            0  (no samples)
+R_hca_yaw            0  (no samples)
+R_smooth_loss        0  (no samples)
+
+Lag (sec) - cross-correlation of d/dt(model_raw_desired) vs d/dt(yaw_actual).
+Pre-shifted by liveDelay; reported value is the residual lag.
+  30_60kmh      : insufficient samples (n=0)
+  60_100kmh     : insufficient samples (n=0)
+  100_140kmh    : insufficient samples (n=0)
+
+Deadband signature (R_model_yaw signed bias in smallest 4 |curv| buckets):
+  sign_0: n=0  mean_signed_bias= n/a 
+  sign_1: n=0  mean_signed_bias= n/a 
+
+Asymmetry signature (pos+neg signed-bias sum per speed; nonzero => left/right mismatch):
+  20kmh   : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  40kmh   : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  60kmh   : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  80kmh   : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  100kmh  : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  120kmh  : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0
+  140kmh  : pos_mean= n/a   neg_mean= n/a   sum= n/a   n+=0 n-=0</pre>
+</body></html>
