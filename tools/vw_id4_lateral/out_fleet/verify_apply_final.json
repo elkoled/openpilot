@@ -1,0 +1,406 @@
+{
+  "059878a793f8f288": {
+    "dongle": "059878a793f8f288",
+    "per_bin": {
+      "20kph": {
+        "deployable": true,
+        "G": 0.8261479139328003,
+        "bias": 0.0001640477275941521,
+        "n_heldout_samples": 5550,
+        "uncorrected_p50": 0.0007303182501345873,
+        "uncorrected_p95": 0.0031690881587564945,
+        "uncorrected_rmse": 0.0015217562904581428,
+        "corrected_p50": 0.0008214106201194227,
+        "corrected_p95": 0.004255251027643681,
+        "corrected_rmse": 0.0018638665787875652,
+        "rmse_improvement_pct": -22.481273651123047
+      },
+      "40kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.95,arx_r2=nan)"
+      },
+      "60kph": {
+        "deployable": true,
+        "G": 0.9684836268424988,
+        "bias": -0.00012204055383335799,
+        "n_heldout_samples": 25634,
+        "uncorrected_p50": 0.00028458103770390153,
+        "uncorrected_p95": 0.0010579199297353625,
+        "uncorrected_rmse": 0.0005062531563453376,
+        "corrected_p50": 0.0002505448064766824,
+        "corrected_p95": 0.0009827909525483847,
+        "corrected_rmse": 0.0004753615357913077,
+        "rmse_improvement_pct": 6.102007865905762
+      },
+      "80kph": {
+        "deployable": true,
+        "G": 0.9548493027687073,
+        "bias": -0.00012523261830210686,
+        "n_heldout_samples": 36344,
+        "uncorrected_p50": 0.0002301244530826807,
+        "uncorrected_p95": 0.0006392865325324237,
+        "uncorrected_rmse": 0.0003409340570215136,
+        "corrected_p50": 0.00016350059013348073,
+        "corrected_p95": 0.0005691359983757138,
+        "corrected_rmse": 0.000289500952931121,
+        "rmse_improvement_pct": 15.085941314697266
+      },
+      "100kph": {
+        "deployable": true,
+        "G": 0.9367923736572266,
+        "bias": -9.626243991078809e-05,
+        "n_heldout_samples": 20285,
+        "uncorrected_p50": 0.0001600504037924111,
+        "uncorrected_p95": 0.0005218056030571461,
+        "uncorrected_rmse": 0.0002554010134190321,
+        "corrected_p50": 0.00012965186033397913,
+        "corrected_p95": 0.00043025886407122016,
+        "corrected_rmse": 0.00020980094268452376,
+        "rmse_improvement_pct": 17.85430335998535
+      },
+      "120kph": {
+        "deployable": true,
+        "G": 0.8655638098716736,
+        "bias": -7.621151598868892e-05,
+        "n_heldout_samples": 9038,
+        "uncorrected_p50": 0.0001578315277583897,
+        "uncorrected_p95": 0.00039944451418705285,
+        "uncorrected_rmse": 0.00021638214820995927,
+        "corrected_p50": 0.0001578975934535265,
+        "corrected_p95": 0.0004559786757454276,
+        "corrected_rmse": 0.00022930798877496272,
+        "rmse_improvement_pct": -5.973613262176514
+      },
+      "140kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.88,arx_r2=nan)"
+      }
+    },
+    "n_train": 112,
+    "n_heldout": 38
+  },
+  "63c4d8470902a8e7": {
+    "dongle": "63c4d8470902a8e7",
+    "per_bin": {
+      "20kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=5720,routes=2"
+      },
+      "40kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.99,arx_r2=nan)"
+      },
+      "60kph": {
+        "deployable": true,
+        "G": 0.9817167520523071,
+        "bias": -6.480388401541859e-05,
+        "n_heldout_samples": 5030,
+        "uncorrected_p50": 9.741046233102679e-05,
+        "uncorrected_p95": 0.00037985079688951373,
+        "uncorrected_rmse": 0.0001731638185447082,
+        "corrected_p50": 0.00010802099131979048,
+        "corrected_p95": 0.00033781162346713245,
+        "corrected_rmse": 0.00017405214020982385,
+        "rmse_improvement_pct": -0.512993335723877
+      },
+      "80kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.92,arx_r2=nan)"
+      },
+      "100kph": {
+        "deployable": true,
+        "G": 0.897763192653656,
+        "bias": -7.827262743376195e-05,
+        "n_heldout_samples": 10092,
+        "uncorrected_p50": 0.00011979523696936667,
+        "uncorrected_p95": 0.00040259180241264403,
+        "uncorrected_rmse": 0.00019988785788882524,
+        "corrected_p50": 9.95641021290794e-05,
+        "corrected_p95": 0.0003713408368639648,
+        "corrected_rmse": 0.00017448618018534034,
+        "rmse_improvement_pct": 12.707966804504395
+      },
+      "120kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=0,routes=0"
+      },
+      "140kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=0,routes=0"
+      }
+    },
+    "n_train": 16,
+    "n_heldout": 6
+  },
+  "7d96ac8f3155dca8": {
+    "dongle": "7d96ac8f3155dca8",
+    "per_bin": {
+      "20kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=0,routes=0"
+      },
+      "40kph": {
+        "deployable": true,
+        "G": 0.9799063801765442,
+        "bias": -8.47879346110858e-06,
+        "n_heldout_samples": 347,
+        "uncorrected_p50": 0.0001724598405417055,
+        "uncorrected_p95": 0.0003557401360012591,
+        "uncorrected_rmse": 0.00020130704797338694,
+        "corrected_p50": 0.00018063638708554208,
+        "corrected_p95": 0.0003397625114303082,
+        "corrected_rmse": 0.0002033072232734412,
+        "rmse_improvement_pct": -0.9935975074768066
+      },
+      "60kph": {
+        "deployable": true,
+        "G": 0.9803510308265686,
+        "bias": 1.818672672015964e-06,
+        "n_heldout_samples": 2005,
+        "uncorrected_p50": 0.00031413754913955927,
+        "uncorrected_p95": 0.0005439959350042045,
+        "uncorrected_rmse": 0.000340967089869082,
+        "corrected_p50": 0.0002953148796223104,
+        "corrected_p95": 0.0005280914483591914,
+        "corrected_rmse": 0.0003235963231418282,
+        "rmse_improvement_pct": 5.094557762145996
+      },
+      "80kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=6496,routes=2"
+      },
+      "100kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=5040,routes=1"
+      },
+      "120kph": {
+        "deployable": true,
+        "G": 0.9004223346710205,
+        "bias": -1.4654920050816145e-05,
+        "n_heldout_samples": 9358,
+        "uncorrected_p50": 0.00015776336658746004,
+        "uncorrected_p95": 0.0005685734795406461,
+        "uncorrected_rmse": 0.0002632485411595553,
+        "corrected_p50": 0.0001278530398849398,
+        "corrected_p95": 0.0005118547705933452,
+        "corrected_rmse": 0.00024280537036247551,
+        "rmse_improvement_pct": 7.765727996826172
+      },
+      "140kph": {
+        "deployable": true,
+        "G": 0.8723326921463013,
+        "bias": -1.386529766023159e-05,
+        "n_heldout_samples": 11964,
+        "uncorrected_p50": 0.00010836900764843449,
+        "uncorrected_p95": 0.00029941985849291086,
+        "uncorrected_rmse": 0.00015780636749695987,
+        "corrected_p50": 0.0001131494645960629,
+        "corrected_p95": 0.00031068784301169217,
+        "corrected_rmse": 0.00015879393322393298,
+        "rmse_improvement_pct": -0.6258130073547363
+      }
+    },
+    "n_train": 18,
+    "n_heldout": 6
+  },
+  "862ee7dd767bf07f": {
+    "dongle": "862ee7dd767bf07f",
+    "reason": "too_few_routes",
+    "n_routes": 1
+  },
+  "aebd8f1d4ea16066": {
+    "dongle": "aebd8f1d4ea16066",
+    "per_bin": {
+      "20kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.88,arx_r2=nan)"
+      },
+      "40kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.94,arx_r2=nan)"
+      },
+      "60kph": {
+        "deployable": true,
+        "G": 0.9470558166503906,
+        "bias": -8.280892870971002e-06,
+        "n_heldout_samples": 82580,
+        "uncorrected_p50": 0.00024666768149472773,
+        "uncorrected_p95": 0.0012839663540944457,
+        "uncorrected_rmse": 0.0006630474235862494,
+        "corrected_p50": 0.0002466072328388691,
+        "corrected_p95": 0.001225875224918127,
+        "corrected_rmse": 0.0006398678524419665,
+        "rmse_improvement_pct": 3.4959137439727783
+      },
+      "80kph": {
+        "deployable": true,
+        "G": 0.9306289553642273,
+        "bias": 1.54278714035172e-05,
+        "n_heldout_samples": 52411,
+        "uncorrected_p50": 0.0001813661801861599,
+        "uncorrected_p95": 0.000792548293247819,
+        "uncorrected_rmse": 0.0004800005117431283,
+        "corrected_p50": 0.0001654389634495601,
+        "corrected_p95": 0.000706331804394722,
+        "corrected_rmse": 0.00043868954526260495,
+        "rmse_improvement_pct": 8.606439590454102
+      },
+      "100kph": {
+        "deployable": true,
+        "G": 0.8585072755813599,
+        "bias": 1.0446060514368583e-05,
+        "n_heldout_samples": 178918,
+        "uncorrected_p50": 0.00013653091446030885,
+        "uncorrected_p95": 0.0004717933479696512,
+        "uncorrected_rmse": 0.0002534733503125608,
+        "corrected_p50": 0.00011817788617918268,
+        "corrected_p95": 0.00043701057438738644,
+        "corrected_rmse": 0.0002324748638784513,
+        "rmse_improvement_pct": 8.284294128417969
+      },
+      "120kph": {
+        "deployable": true,
+        "G": 0.792685866355896,
+        "bias": 6.33281706541311e-06,
+        "n_heldout_samples": 129119,
+        "uncorrected_p50": 0.00012161035556346178,
+        "uncorrected_p95": 0.0004922423977404833,
+        "uncorrected_rmse": 0.00024647876853123307,
+        "corrected_p50": 9.762265835888684e-05,
+        "corrected_p95": 0.0003782456915359944,
+        "corrected_rmse": 0.0001907269179355353,
+        "rmse_improvement_pct": 22.61933135986328
+      },
+      "140kph": {
+        "deployable": true,
+        "G": 0.7564263343811035,
+        "bias": 1.827490450523328e-05,
+        "n_heldout_samples": 63533,
+        "uncorrected_p50": 0.00011296669254079461,
+        "uncorrected_p95": 0.0004703012527897954,
+        "uncorrected_rmse": 0.0002225772332167253,
+        "corrected_p50": 0.00010312095400877297,
+        "corrected_p95": 0.0004196588124614209,
+        "corrected_rmse": 0.00019682184210978448,
+        "rmse_improvement_pct": 11.571436882019043
+      }
+    },
+    "n_train": 670,
+    "n_heldout": 224
+  },
+  "dab4c3d4c55934f5": {
+    "dongle": "dab4c3d4c55934f5",
+    "per_bin": {
+      "20kph": {
+        "deployable": true,
+        "G": 0.9380032420158386,
+        "bias": 0.00010690282215364277,
+        "n_heldout_samples": 508,
+        "uncorrected_p50": 0.00020546448649838567,
+        "uncorrected_p95": 0.0004205215082038194,
+        "uncorrected_rmse": 0.00022996462939772755,
+        "corrected_p50": 0.00011966041347477585,
+        "corrected_p95": 0.00031447011861018836,
+        "corrected_rmse": 0.00017076746735256165,
+        "rmse_improvement_pct": 25.741857528686523
+      },
+      "40kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.99,arx_r2=nan)"
+      },
+      "60kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.92,arx_r2=nan)"
+      },
+      "80kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.96,arx_r2=nan)"
+      },
+      "100kph": {
+        "deployable": true,
+        "G": 0.8166226148605347,
+        "bias": 4.498898852034472e-05,
+        "n_heldout_samples": 10255,
+        "uncorrected_p50": 0.00010886893142014742,
+        "uncorrected_p95": 0.00031959908665157855,
+        "uncorrected_rmse": 0.0001631209161132574,
+        "corrected_p50": 0.00010105457477038726,
+        "corrected_p95": 0.0003008551138918847,
+        "corrected_rmse": 0.0001528272550785914,
+        "rmse_improvement_pct": 6.310451030731201
+      },
+      "120kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.61,arx_r2=nan)"
+      },
+      "140kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=0,routes=0"
+      }
+    },
+    "n_train": 15,
+    "n_heldout": 5
+  },
+  "fc76cf2b65550db6": {
+    "dongle": "fc76cf2b65550db6",
+    "per_bin": {
+      "20kph": {
+        "deployable": true,
+        "G": 0.6925078630447388,
+        "bias": -0.00015551074466202408,
+        "n_heldout_samples": 342,
+        "uncorrected_p50": 0.0005056860391050577,
+        "uncorrected_p95": 0.02597416751086712,
+        "uncorrected_rmse": 0.010526121594011784,
+        "corrected_p50": 0.0004501749644987285,
+        "corrected_p95": 0.011542955413460732,
+        "corrected_rmse": 0.004794575273990631,
+        "rmse_improvement_pct": 54.45069122314453
+      },
+      "40kph": {
+        "deployable": false,
+        "reject_reason": "r2_or_loo_insufficient(static_r2=0.99,arx_r2=nan)"
+      },
+      "60kph": {
+        "deployable": true,
+        "G": 0.7827156186103821,
+        "bias": -7.558351171610411e-06,
+        "n_heldout_samples": 6193,
+        "uncorrected_p50": 0.00015249445277731866,
+        "uncorrected_p95": 0.0004158069787081331,
+        "uncorrected_rmse": 0.0002105213497998193,
+        "corrected_p50": 0.00013006702647544444,
+        "corrected_p95": 0.00036290782736614347,
+        "corrected_rmse": 0.00018595777510199696,
+        "rmse_improvement_pct": 11.667972564697266
+      },
+      "80kph": {
+        "deployable": true,
+        "G": 0.7101080417633057,
+        "bias": -3.465153895376716e-06,
+        "n_heldout_samples": 11189,
+        "uncorrected_p50": 0.00014312972780317068,
+        "uncorrected_p95": 0.00048525255988352,
+        "uncorrected_rmse": 0.00022933482250664383,
+        "corrected_p50": 0.00012719258666038513,
+        "corrected_p95": 0.000527532072737813,
+        "corrected_rmse": 0.00023566329036839306,
+        "rmse_improvement_pct": -2.7594923973083496
+      },
+      "100kph": {
+        "deployable": true,
+        "reject_reason": "no_heldout_samples"
+      },
+      "120kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=0,routes=0"
+      },
+      "140kph": {
+        "deployable": false,
+        "reject_reason": "insufficient_data:n=0,routes=0"
+      }
+    },
+    "n_train": 17,
+    "n_heldout": 6
+  }
+}

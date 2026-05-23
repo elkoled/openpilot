@@ -1,0 +1,60 @@
+{
+  "platform": "VOLKSWAGEN_ID4_MK1",
+  "source_segments": 1662,
+  "source_dongles": 7,
+  "cars_in_fleet_table": 5,
+  "outlier_excluded": "fc76cf2b65550db6",
+  "outlier_reason": "per-car G \u2248 0.7 vs cluster 0.79-0.98; plant is statistically distinct; mix would bias the table",
+  "fleet_table": {
+    "60kph": {
+      "G": 0.9705786406993866,
+      "bias": -3.138863939966541e-05,
+      "n_cars": 4,
+      "G_min": 0.9545959830284119,
+      "G_max": 0.9780677556991577,
+      "contributing_cars": [
+        "dab4c3d4c55934f5",
+        "059878a793f8f288",
+        "63c4d8470902a8e7",
+        "7d96ac8f3155dca8"
+      ]
+    },
+    "100kph": {
+      "G": 0.9061161279678345,
+      "bias": -2.8324510367383482e-05,
+      "n_cars": 4,
+      "G_min": 0.8572186231613159,
+      "G_max": 0.9253573417663574,
+      "contributing_cars": [
+        "dab4c3d4c55934f5",
+        "059878a793f8f288",
+        "63c4d8470902a8e7",
+        "aebd8f1d4ea16066"
+      ]
+    },
+    "120kph": {
+      "G": 0.8621975183486938,
+      "bias": 5.341211817722069e-06,
+      "n_cars": 3,
+      "G_min": 0.7879807353019714,
+      "G_max": 0.9125899076461792,
+      "contributing_cars": [
+        "059878a793f8f288",
+        "aebd8f1d4ea16066",
+        "7d96ac8f3155dca8"
+      ]
+    },
+    "140kph": {
+      "G": 0.854716420173645,
+      "bias": -5.451887318486115e-06,
+      "n_cars": 3,
+      "G_min": 0.7681839466094971,
+      "G_max": 0.8827298283576965,
+      "contributing_cars": [
+        "059878a793f8f288",
+        "aebd8f1d4ea16066",
+        "7d96ac8f3155dca8"
+      ]
+    }
+  }
+}
