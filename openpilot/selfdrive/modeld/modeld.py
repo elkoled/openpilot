@@ -121,6 +121,8 @@ class ModelState:
     self.npy['big_tfm'][:,:] = transforms['big_img'][:,:]
 
     warped = self.warp(**{k: self.input_queues[k] for k in WARP_INPUTS}, frame=self.full_frames['img'], big_frame=self.full_frames['big_img'])
+    if self.WARP_DEV != self.QUEUE_DEV:
+      warped = warped.to(self.QUEUE_DEV).realize()
 
     outs, = self.run_policy(
       **{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, warped=warped
@@ -133,19 +135,14 @@ class ModelState:
       outputs_dict['raw_pred'] = model_output.copy()
     return outputs_dict
 
-  def warmup(self) -> None:
-    bufs = {k: np.zeros(self.frame_buf_params[k][3], dtype=np.uint8) for k in self.vision_input_names}
-    transforms = {k: np.zeros((3, 3), dtype=np.float32) for k in self.vision_input_names}
-    inputs = {
-      'desire_pulse': np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32),
-      'traffic_convention': np.zeros(2, dtype=np.float32),
-      'action_t': np.zeros(2, dtype=np.float32),
-    }
-    self.run(bufs, transforms, inputs)  # type: ignore[arg-type]
-    self.prev_desire.fill(0)
+  def warmup_policy(self) -> None:
+    shape = (2, 6, *self.input_shapes['img'][2:])
+    warped = Tensor(np.zeros(shape, dtype=np.uint8), device=self.QUEUE_DEV).realize()
+    outs, = self.run_policy(
+      **{k: self.input_queues[k] for k in POLICY_INPUTS if k in self.input_queues}, warped=warped
+    )
+    outs.numpy()
     self.input_queues, self.npy = make_input_queues(self.input_shapes, self.frame_skip, device=self.QUEUE_DEV)
-    self.full_frames.clear()
-    self._blob_cache.clear()
 
 
 def main(demo=False):
@@ -198,7 +195,7 @@ def main(demo=False):
     st = time.monotonic()
     try:
       candidate = ModelState(vipc_client_main.width, vipc_client_main.height, True)
-      candidate.warmup()
+      candidate.warmup_policy()
       big_model = candidate
       cloudlog.warning(f"big model loaded in {time.monotonic() - st:.1f}s")
     except Exception:
