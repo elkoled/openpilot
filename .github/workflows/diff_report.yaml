@@ -1,42 +1,49 @@
 name: diff report
+
 on:
   workflow_run:
-    workflows: ["tests"]
+    workflows: [tests]
     types: [completed]
+
 jobs:
   comment:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' && startsWith(github.event.workflow_run.head_branch, 'repro-i-')
+    name: comment
+    if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
       actions: read
-    concurrency:
-      group: diff-report-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
-      cancel-in-progress: true
     steps:
-    - name: Resolve PR number
+    - name: Get PR number
       id: pr
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        PR="${{ github.event.workflow_run.pull_requests[0].number }}"
-        if [ -z "$PR" ]; then
-          PR=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" --jq '.[0].number')
+        pr_number="${{ github.event.workflow_run.pull_requests[0].number }}"
+        if [ -z "$pr_number" ]; then
+          pr_number=$(gh api \
+            "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '.[0].number // empty')
         fi
-        echo "number=$PR" >> "$GITHUB_OUTPUT"
+        if [ -z "$pr_number" ]; then
+          echo "No PR found for ${{ github.event.workflow_run.head_sha }}" >&2
+          exit 1
+        fi
+        echo "pr-number=$pr_number" >> "$GITHUB_OUTPUT"
     - name: Download diff
-      uses: dawidd6/action-download-artifact@v6
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        run_id: ${{ github.event.workflow_run.id }}
-        name: diff_report_${{ steps.pr.outputs.number }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        repository: ${{ github.repository }}
+        run-id: ${{ github.event.workflow_run.id }}
+        name: diff_report_${{ steps.pr.outputs.pr-number }}
         path: .
     - name: Comment on PR
-      uses: thollander/actions-comment-pull-request@v2
+      uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b
       with:
-        filePath: diff_report.txt
-        comment_tag: diff_report
-        pr_number: ${{ steps.pr.outputs.number }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        file-path: diff_report.txt
+        comment-tag: diff_report
+        pr-number: ${{ steps.pr.outputs.pr-number }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
