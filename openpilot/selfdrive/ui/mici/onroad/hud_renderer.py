@@ -186,7 +186,7 @@ class HudRenderer(Widget):
     if ui_state.sm.recv_frame['selfdriveState'] < ui_state.started_frame:
       return
     small_drives = not ui_state.usbgpu_loading and not ui_state.usbgpu_active and ui_state.sm.recv_frame['modelV2'] > ui_state.started_frame
-    big_color = rl.GREEN if ui_state.usbgpu_active else rl.RED if small_drives else rl.GRAY
+    big_color = rl.GREEN if ui_state.usbgpu_active else rl.GRAY
     small_color = rl.GREEN if small_drives else rl.WHITE if ui_state.usbgpu_active else rl.GRAY
     big_size = measure_text_cached(self._font_semi_bold, "BIG", FONT_SIZES.max_speed)
     small_size = measure_text_cached(self._font_semi_bold, "SM", FONT_SIZES.max_speed)
@@ -194,6 +194,9 @@ class HudRenderer(Widget):
     small_pos = rl.Vector2(big_pos.x + (big_size.x - small_size.x) / 2, big_pos.y - FONT_SIZES.max_speed - 2)
     rl.draw_text_ex(self._font_semi_bold, "BIG", big_pos, FONT_SIZES.max_speed, 0, big_color)
     rl.draw_text_ex(self._font_semi_bold, "SM", small_pos, FONT_SIZES.max_speed, 0, small_color)
+    if small_drives:
+      y = big_pos.y + FONT_SIZES.max_speed * 0.55
+      rl.draw_line_ex(rl.Vector2(big_pos.x - 4, y), rl.Vector2(big_pos.x + big_size.x + 4, y), 6, rl.GRAY)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel
