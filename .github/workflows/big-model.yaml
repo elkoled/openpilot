@@ -1,0 +1,88 @@
+name: big model artifact
+
+on:
+  push:
+    paths:
+      - '.github/workflows/big-model.yaml'
+      - 'openpilot/common/file_chunker.py'
+      - 'openpilot/selfdrive/modeld/**'
+      - 'openpilot/system/updated/updated.py'
+      - 'tinygrad_repo/tinygrad/**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Build, validate, and publish on the USB-GPU runner
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install test environment
+        run: uv sync --frozen
+      - name: Test artifact packaging and atomic installation
+        run: uv run python -m unittest openpilot.selfdrive.modeld.tests.test_big_model_artifact
+      - name: Verify the device build has no big-model compiler target
+        run: |
+          ! grep -q 'big_driving_supercombo' openpilot/selfdrive/modeld/SConscript
+          ! grep -q 'USB+AMD' openpilot/selfdrive/modeld/SConscript
+      - name: Lint artifact and updater code
+        run: uv run ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
+
+  build-and-publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: [self-hosted, linux, ARM64, usbgpu]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+      - name: Verify production build hardware
+        run: |
+          test -f /TICI
+          test "$(uname -m)" = aarch64
+          grep -q '^add1$' /sys/bus/usb/devices/*/idVendor
+          grep -q '^0001$' /sys/bus/usb/devices/*/idProduct
+      - name: Verify source descriptor
+        run: |
+          expected="$(python3 openpilot/selfdrive/modeld/big_model_artifact.py fingerprint)"
+          actual="$(python3 -c 'import json; print(json.load(open("openpilot/selfdrive/modeld/models/big_model_artifact.json"))["artifact_id"])')"
+          test "$expected" = "$actual"
+      - name: Compile and package on the target USB GPU
+        env:
+          ASSET_DIR: ${{ runner.temp }}/big-model-assets
+        run: python3 openpilot/selfdrive/modeld/big_model_artifact.py build --output-dir "$ASSET_DIR"
+      - name: Verify every chunk and the reassembled artifact
+        env:
+          ASSET_DIR: ${{ runner.temp }}/big-model-assets
+        run: python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-package --directory "$ASSET_DIR"
+      - name: Prove the packaged model loads on the target USB GPU
+        env:
+          ASSET_DIR: ${{ runner.temp }}/big-model-assets
+        run: python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-load --directory "$ASSET_DIR" --max-seconds 60
+      - name: Publish immutable versioned GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_DIR: ${{ runner.temp }}/big-model-assets
+        run: |
+          artifact_id="$(python3 -c 'import json; print(json.load(open("openpilot/selfdrive/modeld/models/big_model_artifact.json"))["artifact_id"])')"
+          tag="big-model-$artifact_id"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists; refusing to replace validated assets"
+            exit 1
+          fi
+          gh release create "$tag" "$ASSET_DIR"/* \
+            --target "$GITHUB_SHA" \
+            --title "Precompiled big model $artifact_id" \
+            --notes "USB+AMD:LLVM artifact compiled and round-trip validated on target ARM64 hardware." \
+            --latest=false

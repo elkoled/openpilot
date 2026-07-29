@@ -6,7 +6,7 @@ import struct
 import tempfile
 from pathlib import Path
 
-from openpilot.common.file_chunker import get_manifest_path
+from openpilot.selfdrive.modeld.big_model_artifact import artifact_path, validate_installed
 
 MODELS_DIR = Path(__file__).resolve().parent / 'models'
 TG_INPUT_DEVICES_PATH = MODELS_DIR / 'tg_input_devices.json'
@@ -19,8 +19,7 @@ def get_tg_input_devices(process_name: str, usbgpu: bool):
     return json.load(f)[process_name]['default' if not usbgpu else 'usbgpu']
 
 def modeld_pkl_path(usbgpu: bool):
-  prefix = 'big_' if usbgpu else ''
-  return MODELS_DIR / f'{prefix}driving_tinygrad.pkl'
+  return artifact_path() if usbgpu else MODELS_DIR / 'driving_tinygrad.pkl'
 
 def dump_oob(obj, f):
   with tempfile.TemporaryFile(dir=".") as tmp:
@@ -57,4 +56,4 @@ def usbgpu_present() -> bool:
   return False
 
 def usbgpu_compiled() -> bool:
-  return Path(get_manifest_path(modeld_pkl_path(usbgpu=True))).is_file()
+  return validate_installed()

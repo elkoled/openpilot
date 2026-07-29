@@ -6,6 +6,7 @@ import subprocess
 import shutil
 import signal
 import fcntl
+import sys
 import time
 import threading
 from collections import defaultdict
@@ -406,6 +407,13 @@ class Updater:
     # TODO: show agnos download progress
     if AGNOS:
       handle_agnos_update()
+
+    # Fetch the precompiled USB-GPU model while the update is still staged.
+    # This is intentionally outside SCons: boot and device builds never compile
+    # or download the big model.
+    artifact_script = os.path.join(OVERLAY_MERGED, "openpilot/selfdrive/modeld/big_model_artifact.py")
+    if os.path.isfile(artifact_script):
+      run([sys.executable, artifact_script, "install", "--if-usbgpu"], OVERLAY_MERGED)
 
     # Create the finalized, ready-to-swap update
     self.params.put("UpdaterState", "finalizing update...", block=True)
