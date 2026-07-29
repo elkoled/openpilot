@@ -12,7 +12,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--camera-resolution", default="1344x760")
   parser.add_argument("--runs", type=int, default=5)
-  parser.add_argument("--max-ms", type=float, default=100.)
+  parser.add_argument("--max-ms", type=float, default=50.)
   args = parser.parse_args()
 
   from tinygrad import Device
@@ -35,6 +35,7 @@ if __name__ == "__main__":
     runtimes.append((time.perf_counter() - start) * 1e3)
     assert output
 
-  runtime_ms = statistics.median(runtimes)
-  print(f"big model runtime: {runtime_ms:.2f} ms ({', '.join(f'{t:.2f}' for t in runtimes)})")
-  assert runtime_ms <= args.max_ms, f"{runtime_ms:.2f} ms exceeds {args.max_ms:.2f} ms"
+  median_ms = statistics.median(runtimes)
+  max_ms = max(runtimes)
+  print(f"big model runtime: median {median_ms:.2f} ms, max {max_ms:.2f} ms ({', '.join(f'{t:.2f}' for t in runtimes)})")
+  assert max_ms <= args.max_ms, f"{max_ms:.2f} ms exceeds {args.max_ms:.2f} ms"
