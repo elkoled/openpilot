@@ -41,6 +41,10 @@ class TestBigModelArtifact(unittest.TestCase):
       self.assertTrue(artifact.validate_installed(cache, self.descriptor, full_hash=True))
       self.assertEqual(manifest["chunk_count"], 4)
 
+      local_cache = self.root / "local-cache"
+      artifact._stage_local_package(release, local_cache, self.descriptor)
+      self.assertTrue(artifact.validate_installed(local_cache, self.descriptor, full_hash=True))
+
       first_chunk = destination / manifest["files"][0]["name"]
       first_chunk.write_bytes(b"corrupt!!!")
       self.assertFalse(artifact.validate_installed(cache, self.descriptor, full_hash=True))

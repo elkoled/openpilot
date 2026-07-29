@@ -8,6 +8,7 @@ modeld never needs network access or a compiler at boot.
 """
 
 import argparse
+import gc
 import hashlib
 import json
 import os
@@ -71,6 +72,11 @@ BUILD_RECIPE = {
   "python": f"{sys.version_info.major}.{sys.version_info.minor}",
   "schema": SCHEMA_VERSION,
 }
+
+
+def _parse_size(value: str) -> tuple[int, int]:
+  width, height = value.lower().split("x")
+  return int(width), int(height)
 
 
 def _repo_root() -> Path:
@@ -339,6 +345,63 @@ def validate_load(directory: Path, descriptor_path: Path = DESCRIPTOR_PATH, max_
     chunk_manifest.unlink(missing_ok=True)
 
 
+def _stage_local_package(directory: Path, cache_root: Path, descriptor_path: Path = DESCRIPTOR_PATH) -> Path:
+  """Install a verified local package into an isolated cache without networking."""
+  validate_package(directory, descriptor_path)
+  descriptor = load_descriptor(descriptor_path)
+  destination = artifact_dir(descriptor, cache_root)
+  destination.mkdir(parents=True)
+  with (directory / REMOTE_MANIFEST_NAME).open() as f:
+    manifest = json.load(f)
+  shutil.copy2(directory / REMOTE_MANIFEST_NAME, destination / REMOTE_MANIFEST_NAME)
+  for entry in validate_remote_manifest(manifest, descriptor):
+    source, target = directory / entry["name"], destination / entry["name"]
+    try:
+      os.link(source, target)
+    except OSError:
+      shutil.copy2(source, target)
+  (destination / f"{ARTIFACT_NAME}.chunkmanifest").write_text(str(manifest["chunk_count"]))
+  if not validate_installed(cache_root, descriptor_path, full_hash=True):
+    raise ValueError("locally staged artifact failed verification")
+  return destination
+
+
+def validate_runtime(directory: Path, descriptor_path: Path = DESCRIPTOR_PATH, max_seconds: float = 60.,
+                     camera_size: tuple[int, int] = (1344, 760)) -> float:
+  """Exercise the exact modeld construction and warmup path under its deadline."""
+  with tempfile.TemporaryDirectory(prefix="big-model-runtime-", dir=directory.parent) as temporary:
+    cache_root = Path(temporary)
+    _stage_local_package(directory, cache_root, descriptor_path)
+
+    # modeld imports these values at module import time.
+    os.environ["BIG_MODEL_CACHE_ROOT"] = str(cache_root)
+    os.environ["GMMU"] = "0"
+    from openpilot.selfdrive.modeld.modeld import ModelState
+    from tinygrad import Device
+
+    start = time.monotonic()
+    model = ModelState(*camera_size, usbgpu=True)
+    model.warmup()
+    Device.default.synchronize()
+    elapsed = time.monotonic() - start
+    del model
+    gc.collect()
+
+    if elapsed > max_seconds:
+      raise TimeoutError(f"precompiled model runtime startup took {elapsed:.1f}s (limit {max_seconds:.1f}s)")
+    with (directory / REMOTE_MANIFEST_NAME).open() as f:
+      manifest = json.load(f)
+    validation = manifest.setdefault("validation", {})
+    validation.setdefault("runtime", {})[f"{camera_size[0]}x{camera_size[1]}"] = {
+      "max_seconds": max_seconds,
+      "runtime_startup_seconds": round(elapsed, 3),
+      "target": "USB+AMD:LLVM",
+    }
+    (directory / REMOTE_MANIFEST_NAME).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    print(f"precompiled big model constructed and warmed in {elapsed:.1f}s")
+    return elapsed
+
+
 def compile_model(output: Path) -> None:
   if platform.machine() != "aarch64" or not Path("/TICI").is_file():
     raise RuntimeError("the production artifact must be compiled on an ARM64 comma device")
@@ -391,6 +454,11 @@ def main() -> None:
   validate_load_parser.add_argument("--directory", type=Path, required=True)
   validate_load_parser.add_argument("--descriptor", type=Path, default=DESCRIPTOR_PATH)
   validate_load_parser.add_argument("--max-seconds", type=float, default=60.)
+  validate_runtime_parser = subparsers.add_parser("validate-runtime")
+  validate_runtime_parser.add_argument("--directory", type=Path, required=True)
+  validate_runtime_parser.add_argument("--descriptor", type=Path, default=DESCRIPTOR_PATH)
+  validate_runtime_parser.add_argument("--max-seconds", type=float, default=60.)
+  validate_runtime_parser.add_argument("--camera-resolution", type=_parse_size, default=(1344, 760))
   args = parser.parse_args()
 
   if args.command == "fingerprint":
@@ -416,6 +484,8 @@ def main() -> None:
     validate_package(args.directory, args.descriptor)
   elif args.command == "validate-load":
     validate_load(args.directory, args.descriptor, args.max_seconds)
+  elif args.command == "validate-runtime":
+    validate_runtime(args.directory, args.descriptor, args.max_seconds, args.camera_resolution)
 
 
 if __name__ == "__main__":

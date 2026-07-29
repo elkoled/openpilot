@@ -67,11 +67,17 @@ jobs:
         env:
           ASSET_DIR: ${{ runner.temp }}/big-model-assets
         run: python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-package --directory "$ASSET_DIR"
-      - name: Prove the packaged model loads on the target USB GPU
+      - name: Generate runtime device configuration
+        run: scons openpilot/selfdrive/modeld/models/tg_input_devices.json
+      - name: Prove the packaged model starts on the target USB GPU
         env:
           ASSET_DIR: ${{ runner.temp }}/big-model-assets
-        run: python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-load --directory "$ASSET_DIR" --max-seconds 60
-      - name: Publish immutable versioned GitHub Release assets
+        run: |
+          python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-runtime \
+            --directory "$ASSET_DIR" --camera-resolution 1344x760 --max-seconds 60
+          python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-runtime \
+            --directory "$ASSET_DIR" --camera-resolution 1928x1208 --max-seconds 60
+      - name: Publish non-overwriting versioned GitHub Release assets
         env:
           GH_TOKEN: ${{ github.token }}
           ASSET_DIR: ${{ runner.temp }}/big-model-assets
