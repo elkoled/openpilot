@@ -43,7 +43,7 @@ tg_devices = { # which device to put jit inputs to at runtime
   },
 }
 
-USBGPU = usbgpu_present()
+USBGPU = os.getenv('BUILD_BIG_MODEL') and usbgpu_present()
 if USBGPU:
   usbgpu_tg_flags = f'DEBUG=2 DEV=USB+AMD:LLVM WARP_DEV={tg_backend} FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0'
   # the USB+AMD GPU takes an exclusive flock; serialize all targets that touch it

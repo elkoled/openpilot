@@ -62,6 +62,12 @@ pull_lfs() {
   # the worktree, but don't download or copy the 1.8 GB LFS object.
   LFS_EXCLUDE="openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx"
 
+  if [ -n "$BUILD_BIG_MODEL" ]; then
+    git config --local --unset-all lfs.fetchexclude || true
+    git lfs pull
+    return
+  fi
+
   git config --local lfs.fetchexclude "$LFS_EXCLUDE"
   git lfs pull --exclude="$LFS_EXCLUDE"
   if git cat-file -e "HEAD:$LFS_EXCLUDE"; then
