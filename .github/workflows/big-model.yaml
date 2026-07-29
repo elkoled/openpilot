@@ -1,0 +1,37 @@
+name: big model
+
+on:
+  push:
+    branches: [gpu-nightly]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/gpu-nightly'
+    env:
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/tinygrad_repo
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [comma-four-egpu-1, comma-four-egpu-2, comma-four-egpu-3]
+    runs-on: [self-hosted, linux, ARM64, "${{ matrix.runner }}"]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          lfs: true
+          submodules: true
+      - run: ./tools/op.sh setup
+      - name: Compile
+        run: |
+          test -f /TICI
+          grep -q '^add1$' /sys/bus/usb/devices/*/idVendor
+          grep -q '^0001$' /sys/bus/usb/devices/*/idProduct
+          BUILD_BIG_MODEL=1 scons \
+            openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest \
+            openpilot/selfdrive/modeld/models/tg_input_devices.json
+      - name: Run and benchmark
+        run: python3 tools/modeld/benchmark_big_model.py --max-ms 100
