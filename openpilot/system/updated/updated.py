@@ -413,7 +413,8 @@ class Updater:
     # or download the big model.
     artifact_script = os.path.join(OVERLAY_MERGED, "openpilot/selfdrive/modeld/big_model_artifact.py")
     if os.path.isfile(artifact_script):
-      run([sys.executable, artifact_script, "install", "--if-usbgpu"], OVERLAY_MERGED)
+      run([sys.executable, "-m", "openpilot.selfdrive.modeld.big_model_artifact",
+           "--root", OVERLAY_MERGED, "--if-usbgpu"], OVERLAY_MERGED)
 
     # Create the finalized, ready-to-swap update
     self.params.put("UpdaterState", "finalizing update...", block=True)

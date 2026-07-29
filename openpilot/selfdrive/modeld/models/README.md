@@ -19,7 +19,7 @@ tinygrad, compiler, serialization, or preprocessing change alters the
 fingerprint and requires a new artifact:
 
 ```sh
-python3 openpilot/selfdrive/modeld/big_model_artifact.py write-descriptor
+python3 -m tools.modeld.build_big_model write-descriptor
 ```
 
 After that descriptor is reviewed and committed to `gpu-nightly`, dispatch the

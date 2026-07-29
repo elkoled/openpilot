@@ -14,6 +14,7 @@ blacklist = [
 
   # skip big model for now
   "openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx",
+  "tools/modeld/build_big_model.py",
 
   # no LFS or submodules in release
   ".lfsconfig",

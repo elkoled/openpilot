@@ -6,12 +6,10 @@ import struct
 import tempfile
 from pathlib import Path
 
-from openpilot.selfdrive.modeld.big_model_artifact import artifact_path, validate_installed
+from openpilot.selfdrive.modeld.big_model_artifact import get_artifact_path, verify_artifact
 
 MODELS_DIR = Path(__file__).resolve().parent / 'models'
 TG_INPUT_DEVICES_PATH = MODELS_DIR / 'tg_input_devices.json'
-USBGPU_VID = 0xADD1
-USBGPU_PID = 0x0001
 
 
 def get_tg_input_devices(process_name: str, usbgpu: bool):
@@ -19,7 +17,7 @@ def get_tg_input_devices(process_name: str, usbgpu: bool):
     return json.load(f)[process_name]['default' if not usbgpu else 'usbgpu']
 
 def modeld_pkl_path(usbgpu: bool):
-  return artifact_path() if usbgpu else MODELS_DIR / 'driving_tinygrad.pkl'
+  return get_artifact_path() if usbgpu else MODELS_DIR / 'driving_tinygrad.pkl'
 
 def dump_oob(obj, f):
   with tempfile.TemporaryFile(dir=".") as tmp:
@@ -45,15 +43,5 @@ def load_oob(f):
       yield pb
   return pickle.load(io.BytesIO(opcodes), buffers=buffers())
 
-def usbgpu_present() -> bool:
-  for d in Path("/sys/bus/usb/devices").glob("*"):
-    try:
-      if int((d / "idVendor").read_text(), 16) == USBGPU_VID and \
-          int((d / "idProduct").read_text(), 16) == USBGPU_PID:
-        return True
-    except Exception:
-      pass
-  return False
-
 def usbgpu_compiled() -> bool:
-  return validate_installed()
+  return verify_artifact()

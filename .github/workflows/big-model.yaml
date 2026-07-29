@@ -8,6 +8,8 @@ on:
       - 'openpilot/selfdrive/modeld/**'
       - 'openpilot/system/updated/updated.py'
       - 'tinygrad_repo/tinygrad/**'
+      - 'tools/modeld/build_big_model.py'
+      - 'tools/release/release_files.py'
   workflow_dispatch:
     inputs:
       publish:
@@ -34,7 +36,7 @@ jobs:
           ! grep -q 'big_driving_supercombo' openpilot/selfdrive/modeld/SConscript
           ! grep -q 'USB+AMD' openpilot/selfdrive/modeld/SConscript
       - name: Lint artifact and updater code
-        run: uvx --from ruff==0.16.0 ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
+        run: uvx --from ruff==0.16.0 ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py tools/modeld/build_big_model.py
 
   build-and-publish:
     if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/gpu-nightly'
@@ -56,26 +58,26 @@ jobs:
           grep -q '^0001$' /sys/bus/usb/devices/*/idProduct
       - name: Verify source descriptor
         run: |
-          expected="$(python3 openpilot/selfdrive/modeld/big_model_artifact.py fingerprint)"
+          expected="$(python3 -m tools.modeld.build_big_model fingerprint)"
           actual="$(python3 -c 'import json; print(json.load(open("openpilot/selfdrive/modeld/models/big_model_artifact.json"))["artifact_id"])')"
           test "$expected" = "$actual"
       - name: Compile and package on the target USB GPU
         env:
           ASSET_DIR: ${{ runner.temp }}/big-model-assets
-        run: python3 openpilot/selfdrive/modeld/big_model_artifact.py build --output-dir "$ASSET_DIR"
+        run: python3 -m tools.modeld.build_big_model build --directory "$ASSET_DIR"
       - name: Verify every chunk and the reassembled artifact
         env:
           ASSET_DIR: ${{ runner.temp }}/big-model-assets
-        run: python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-package --directory "$ASSET_DIR"
+        run: python3 -m tools.modeld.build_big_model validate-package --directory "$ASSET_DIR"
       - name: Generate runtime device configuration
         run: scons openpilot/selfdrive/modeld/models/tg_input_devices.json
       - name: Prove the packaged model starts on the target USB GPU
         env:
           ASSET_DIR: ${{ runner.temp }}/big-model-assets
         run: |
-          python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-runtime \
+          python3 -m tools.modeld.build_big_model validate-runtime \
             --directory "$ASSET_DIR" --camera-resolution 1344x760 --max-seconds 60
-          python3 openpilot/selfdrive/modeld/big_model_artifact.py validate-runtime \
+          python3 -m tools.modeld.build_big_model validate-runtime \
             --directory "$ASSET_DIR" --camera-resolution 1928x1208 --max-seconds 60
       - name: Publish non-overwriting versioned GitHub Release assets
         env:

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import tempfile
@@ -13,9 +14,8 @@ class TestBigModelArtifact(unittest.TestCase):
     self.tmp = tempfile.TemporaryDirectory()
     self.root = Path(self.tmp.name)
     self.artifact_id = "a" * 64
-    self.descriptor = self.root / artifact.DESCRIPTOR_NAME
+    self.descriptor = self.root / "descriptor.json"
     self.descriptor.write_text(json.dumps({
-      "schema": artifact.SCHEMA_VERSION,
       "artifact_id": self.artifact_id,
       "artifact_name": artifact.ARTIFACT_NAME,
     }))
@@ -23,78 +23,81 @@ class TestBigModelArtifact(unittest.TestCase):
   def tearDown(self):
     self.tmp.cleanup()
 
-  def test_package_install_and_detect_corruption(self):
-    compiled = self.root / artifact.ARTIFACT_NAME
-    compiled.write_bytes(bytes(range(35)))
+  def make_release(self, data: bytes) -> tuple[Path, dict]:
     release = self.root / "release"
+    release.mkdir()
+    count = (len(data) + artifact.CHUNK_SIZE - 1) // artifact.CHUNK_SIZE
+    files = []
+    for i in range(count):
+      name = artifact.get_chunk_name(artifact.ARTIFACT_NAME, i, count)
+      path = release / name
+      path.write_bytes(data[i * artifact.CHUNK_SIZE:(i + 1) * artifact.CHUNK_SIZE])
+      files.append({"name": name, "size": path.stat().st_size, "sha256": artifact.sha256(path)})
+    manifest = {
+      "artifact_id": self.artifact_id,
+      "files": files,
+      "sha256": hashlib.sha256(data).hexdigest(),
+      "size": len(data),
+    }
+    (release / artifact.MANIFEST_NAME).write_text(json.dumps(manifest))
+    return release, manifest
+
+  def test_install_and_detect_corruption(self):
     cache = self.root / "cache"
+    with patch.object(artifact, "CHUNK_SIZE", 10):
+      release, manifest = self.make_release(bytes(range(35)))
 
-    with patch.object(artifact, "CHUNK_SIZE", 10), \
-         patch.object(artifact, "compatibility_id", return_value=self.artifact_id):
-      manifest = artifact.package(compiled, release, self.descriptor)
+      def fake_download(url: str, destination: Path):
+        shutil.copyfile(release / url.rsplit("/", 1)[-1], destination)
 
-    def fake_download(url: str, destination: Path):
-      shutil.copyfile(release / url.rsplit("/", 1)[-1], destination)
+      with patch.object(artifact, "download_file", side_effect=fake_download):
+        destination = artifact.install(self.root, cache, self.descriptor, "owner/repo")
 
-    with patch.object(artifact, "CHUNK_SIZE", 10), patch.object(artifact, "_download", side_effect=fake_download):
-      destination = artifact.install("owner/repo", self.root, cache, self.descriptor)
-      self.assertTrue(artifact.validate_installed(cache, self.descriptor, full_hash=True))
-      self.assertEqual(manifest["chunk_count"], 4)
-
-      local_cache = self.root / "local-cache"
-      artifact._stage_local_package(release, local_cache, self.descriptor)
-      self.assertTrue(artifact.validate_installed(local_cache, self.descriptor, full_hash=True))
-
+      self.assertTrue(artifact.verify_artifact(cache, self.descriptor, check_hash=True))
       first_chunk = destination / manifest["files"][0]["name"]
       first_chunk.write_bytes(b"corrupt!!!")
-      self.assertFalse(artifact.validate_installed(cache, self.descriptor, full_hash=True))
+      self.assertFalse(artifact.verify_artifact(cache, self.descriptor, check_hash=True))
 
-  def test_manifest_rejects_missing_or_reordered_chunks(self):
-    descriptor = artifact.load_descriptor(self.descriptor)
+  def test_manifest_rejects_reordered_chunks(self):
     manifest = {
-      "schema": artifact.SCHEMA_VERSION,
       "artifact_id": self.artifact_id,
-      "chunk_count": 2,
-      "total_size": 2,
       "files": [
         {"name": artifact.get_chunk_name(artifact.ARTIFACT_NAME, 1, 2), "size": 1, "sha256": "0" * 64},
         {"name": artifact.get_chunk_name(artifact.ARTIFACT_NAME, 0, 2), "size": 1, "sha256": "0" * 64},
       ],
+      "sha256": "0" * 64,
+      "size": 2,
     }
-    with self.assertRaisesRegex(ValueError, "incomplete or out of order"):
-      artifact.validate_remote_manifest(manifest, descriptor)
+    path = self.root / artifact.MANIFEST_NAME
+    path.write_text(json.dumps(manifest))
+    with self.assertRaises(AssertionError):
+      artifact.get_manifest(path, self.descriptor)
 
   def test_install_resumes_verified_chunks(self):
-    compiled = self.root / artifact.ARTIFACT_NAME
-    compiled.write_bytes(bytes(range(25)))
-    release = self.root / "release"
     cache = self.root / "cache"
-    with patch.object(artifact, "CHUNK_SIZE", 10), \
-         patch.object(artifact, "compatibility_id", return_value=self.artifact_id):
-      manifest = artifact.package(compiled, release, self.descriptor)
+    with patch.object(artifact, "CHUNK_SIZE", 10):
+      release, manifest = self.make_release(bytes(range(25)))
+      calls: dict[str, int] = {}
+      fail_name = manifest["files"][1]["name"]
 
-    calls: dict[str, int] = {}
-    fail_name = manifest["files"][1]["name"]
+      def flaky_download(url: str, destination: Path):
+        name = url.rsplit("/", 1)[-1]
+        calls[name] = calls.get(name, 0) + 1
+        if name == fail_name and calls[name] == 1:
+          raise OSError("interrupted")
+        shutil.copyfile(release / name, destination)
 
-    def flaky_download(url: str, destination: Path):
-      name = url.rsplit("/", 1)[-1]
-      calls[name] = calls.get(name, 0) + 1
-      if name == fail_name and calls[name] == 1:
-        raise OSError("interrupted")
-      shutil.copyfile(release / name, destination)
-
-    with patch.object(artifact, "CHUNK_SIZE", 10), patch.object(artifact, "_download", side_effect=flaky_download):
-      with self.assertRaisesRegex(OSError, "interrupted"):
-        artifact.install("owner/repo", self.root, cache, self.descriptor)
-      artifact.install("owner/repo", self.root, cache, self.descriptor)
+      with patch.object(artifact, "download_file", side_effect=flaky_download):
+        with self.assertRaisesRegex(OSError, "interrupted"):
+          artifact.install(self.root, cache, self.descriptor, "owner/repo")
+        artifact.install(self.root, cache, self.descriptor, "owner/repo")
 
     self.assertEqual(calls[manifest["files"][0]["name"]], 1)
     self.assertEqual(calls[fail_name], 2)
 
   def test_artifact_path_is_versioned(self):
-    descriptor = artifact.load_descriptor(self.descriptor)
     self.assertEqual(
-      artifact.artifact_path(descriptor, self.root),
+      artifact.get_artifact_path(self.root, self.descriptor),
       self.root / f"big-model-{self.artifact_id}" / artifact.ARTIFACT_NAME,
     )
 
