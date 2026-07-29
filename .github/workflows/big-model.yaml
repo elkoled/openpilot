@@ -27,16 +27,14 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - name: Install test environment
-        run: uv sync --frozen
       - name: Test artifact packaging and atomic installation
-        run: uv run python -m unittest openpilot.selfdrive.modeld.tests.test_big_model_artifact
+        run: python3 -m unittest openpilot.selfdrive.modeld.tests.test_big_model_artifact
       - name: Verify the device build has no big-model compiler target
         run: |
           ! grep -q 'big_driving_supercombo' openpilot/selfdrive/modeld/SConscript
           ! grep -q 'USB+AMD' openpilot/selfdrive/modeld/SConscript
       - name: Lint artifact and updater code
-        run: uv run ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
+        run: uvx --from ruff==0.14.10 ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
 
   build-and-publish:
     if: github.event_name == 'workflow_dispatch' && inputs.publish
