@@ -169,7 +169,8 @@ node {
   env.GIT_COMMIT = checkout(scm).GIT_COMMIT
 
   def excludeBranches = ['__nightly', 'devel', 'devel-staging',
-                         'release-tizi', 'release-tizi-staging', 'release-mici', 'release-mici-staging', 'testing-closet*', 'hotfix-*']
+                         'release-tizi', 'release-tizi-staging', 'release-mici', 'release-mici-staging', 'mici-chestnut',
+                         'testing-closet*', 'hotfix-*']
   def excludeRegex = excludeBranches.join('|').replaceAll('\\*', '.*')
 
   if (env.BRANCH_NAME != 'master' && !env.BRANCH_NAME.contains('__jenkins_loop_')) {
@@ -197,13 +198,14 @@ node {
             step("build nightly-dev", "PANDA_DEBUG_BUILD=1 RELEASE_BRANCH=nightly-dev $SOURCE_DIR/tools/release/build_release.sh"),
           ])
         },
-        'mici chestnut': {
-          deviceStage("mici chestnut", "mici-chestnut", ["BUILD_BIG_MODEL=1"], [
-            step("compile big model", "BUILD_BIG_MODEL=1 scons openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest openpilot/selfdrive/modeld/models/tg_input_devices.json", [timeout: 1800]),
-            step("benchmark big model", "python3 -m tools.modeld.benchmark_big_model --camera-resolution 1344x760 --max-ms 50", [timeout: 300]),
-          ])
-        },
       )
+    }
+
+    if (env.BRANCH_NAME in ['__nightly', 'mici-chestnut']) {
+      deviceStage("mici chestnut", "mici-chestnut", ["BUILD_BIG_MODEL=1"], [
+        step("compile big model", "BUILD_BIG_MODEL=1 scons openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest openpilot/selfdrive/modeld/models/tg_input_devices.json", [timeout: 1800]),
+        step("benchmark big model", "python3 -m tools.modeld.benchmark_big_model --camera-resolution 1344x760 --max-ms 50", [timeout: 300]),
+      ])
     }
 
     if (!env.BRANCH_NAME.matches(excludeRegex)) {
