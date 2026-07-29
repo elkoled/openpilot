@@ -37,7 +37,7 @@ jobs:
         run: uvx --from ruff==0.16.0 ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
 
   build-and-publish:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/gpu-nightly'
     runs-on: [self-hosted, linux, ARM64, usbgpu]
     permissions:
       contents: write

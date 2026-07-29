@@ -22,8 +22,9 @@ fingerprint and requires a new artifact:
 python3 openpilot/selfdrive/modeld/big_model_artifact.py write-descriptor
 ```
 
-After that descriptor is reviewed and committed, dispatch the workflow with
-`publish=true`. Existing release tags are never replaced.
+After that descriptor is reviewed and committed to `gpu-nightly`, dispatch the
+workflow from that branch with `publish=true`. The hardware build/publish job is
+gated to `gpu-nightly`, and existing release tags are never replaced.
 
 On USB-GPU devices, `updated` downloads and fully verifies the versioned
 artifact into `/data/model_cache/openpilot` before finalizing the software
