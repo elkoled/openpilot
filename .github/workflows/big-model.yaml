@@ -34,7 +34,7 @@ jobs:
           ! grep -q 'big_driving_supercombo' openpilot/selfdrive/modeld/SConscript
           ! grep -q 'USB+AMD' openpilot/selfdrive/modeld/SConscript
       - name: Lint artifact and updater code
-        run: uvx --from ruff==0.14.10 ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
+        run: uvx --from ruff==0.16.0 ruff check openpilot/selfdrive/modeld/big_model_artifact.py openpilot/selfdrive/modeld/helpers.py openpilot/system/updated/updated.py
 
   build-and-publish:
     if: github.event_name == 'workflow_dispatch' && inputs.publish
