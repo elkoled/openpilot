@@ -92,11 +92,10 @@ def deviceStage(String stageName, String deviceType, List extra_env, def steps) 
     lock(resource: "", label: deviceType, inversePrecedence: true, variable: 'device_ip', quantity: 1, resourceSelectStrategy: 'random') {
       docker.image('ghcr.io/commaai/alpine-ssh').inside('--user=root') {
         timeout(time: 35, unit: 'MINUTES') {
-          def device_host = env.device_ip0_PROP_HOST ?: device_ip
           retry (3) {
             def date = sh(script: 'date', returnStdout: true).trim();
-            device(device_host, "set time", "date -s '" + date + "'")
-            device(device_host, "git checkout", extra + "\n" + readFile("openpilot/selfdrive/test/setup_device_ci.sh"))
+            device(device_ip, "set time", "date -s '" + date + "'")
+            device(device_ip, "git checkout", extra + "\n" + readFile("openpilot/selfdrive/test/setup_device_ci.sh"))
           }
           steps.each { item ->
             def name = item[0]
@@ -111,7 +110,7 @@ def deviceStage(String stageName, String deviceType, List extra_env, def steps) 
               return
             } else {
               timeout(time: cmdTimeout, unit: 'SECONDS') {
-                device(device_host, name, cmd)
+                device(device_ip, name, cmd)
               }
             }
           }
