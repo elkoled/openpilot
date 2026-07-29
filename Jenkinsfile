@@ -158,13 +158,6 @@ def step(String name, String cmd, Map args = [:]) {
   return [name, cmd, args]
 }
 
-def bigModelStage(String name) {
-  deviceStage(name, "mici-egpu", ["BUILD_BIG_MODEL=1"], [
-    step("compile big model", "BUILD_BIG_MODEL=1 scons openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest openpilot/selfdrive/modeld/models/tg_input_devices.json", [timeout: 1800]),
-    step("benchmark big model", "python3 -m tools.modeld.benchmark_big_model --camera-resolution 1344x760 --max-ms 50", [timeout: 300]),
-  ])
-}
-
 node {
   env.CI = "1"
   env.PYTHONWARNINGS = "error"
@@ -204,14 +197,11 @@ node {
             step("build nightly-dev", "PANDA_DEBUG_BUILD=1 RELEASE_BRANCH=nightly-dev $SOURCE_DIR/tools/release/build_release.sh"),
           ])
         },
-        'big-model-1': {
-          bigModelStage("big model 1")
-        },
-        'big-model-2': {
-          bigModelStage("big model 2")
-        },
-        'big-model-3': {
-          bigModelStage("big model 3")
+        'mici chestnut': {
+          deviceStage("mici chestnut", "mici-chestnut", ["BUILD_BIG_MODEL=1"], [
+            step("compile big model", "BUILD_BIG_MODEL=1 scons openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest openpilot/selfdrive/modeld/models/tg_input_devices.json", [timeout: 1800]),
+            step("benchmark big model", "python3 -m tools.modeld.benchmark_big_model --camera-resolution 1344x760 --max-ms 50", [timeout: 300]),
+          ])
         },
       )
     }
