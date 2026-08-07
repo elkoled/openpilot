@@ -84,6 +84,9 @@ class ChestnutState:
     state = msg.chestnutState
     try:
       smu = Device["AMD"].iface.dev_impl.smu
+      # a wedged smu makes every read below stall the model loop until its message timeout
+      if not smu.is_smu_alive():
+        raise TimeoutError("smu not alive")
       metrics = smu.read_table(smu.smu_mod.SmuMetricsExternal_t, smu.smu_mod.TABLE_SMU_METRICS).SmuMetrics
       state.tempC = metrics.AvgTemperature[smu.smu_mod.TEMP_HOTSPOT]
       state.memoryTempC = metrics.AvgTemperature[smu.smu_mod.TEMP_MEM]
