@@ -2,7 +2,7 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import toggle_item
+from openpilot.system.ui.widgets.list_view import button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -37,6 +37,17 @@ class DeveloperLayout(Widget):
     super().__init__()
     self._params = Params()
     self._is_release = False  # self._params.get_bool("IsReleaseBranch")
+
+    self._blink_left_btn = button_item(
+      lambda: tr("Blink Left"), tr("BLINK"),
+      description=lambda: tr("Blink the left turn signal once while the vehicle is stationary."),
+      callback=lambda: self._request_blinker_test("BlinkerTestLeft"),
+    )
+    self._blink_right_btn = button_item(
+      lambda: tr("Blink Right"), tr("BLINK"),
+      description=lambda: tr("Blink the right turn signal once while the vehicle is stationary."),
+      callback=lambda: self._request_blinker_test("BlinkerTestRight"),
+    )
 
     # Build items and keep references for callbacks/state updates
     self._adb_toggle = toggle_item(
@@ -95,6 +106,8 @@ class DeveloperLayout(Widget):
     self._on_enable_ui_debug(self._params.get_bool("ShowDebugInfo"))
 
     self._scroller = Scroller([
+      self._blink_left_btn,
+      self._blink_right_btn,
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys,
@@ -108,6 +121,11 @@ class DeveloperLayout(Widget):
     # Toggles should be not available to change in onroad state
     ui_state.add_offroad_transition_callback(self._update_toggles)
 
+  def _request_blinker_test(self, param: str) -> None:
+    other_param = "BlinkerTestRight" if param == "BlinkerTestLeft" else "BlinkerTestLeft"
+    self._params.remove(other_param)
+    self._params.put_bool(param, True)
+
   def _render(self, rect):
     self._scroller.render(rect)
 
@@ -118,6 +136,10 @@ class DeveloperLayout(Widget):
 
   def _update_toggles(self):
     ui_state.update_params()
+
+    gv80 = ui_state.CP is not None and ui_state.CP.carFingerprint == "GENESIS_GV80_2025"
+    self._blink_left_btn.action_item.set_enabled(gv80)
+    self._blink_right_btn.action_item.set_enabled(gv80)
 
     # Hide non-release toggles on release builds
     # TODO: we can do an onroad cycle, but alpha long toggle requires a deinit function to re-enable radar and not fault

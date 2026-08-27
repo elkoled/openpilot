@@ -16,8 +16,6 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-from openpilot.system.ui.widgets.list_view import button_item
-
 from openpilot.system.ui.sunnypilot.widgets.html_render import HtmlModalSP
 from openpilot.system.ui.sunnypilot.widgets.list_view import toggle_item_sp
 
@@ -31,18 +29,10 @@ class DeveloperLayoutSP(DeveloperLayout):
     self._is_release_branch: bool = self._is_release or ui_state.params.get_bool("IsReleaseSpBranch")
     self._is_development_branch: bool = ui_state.params.get_bool("IsTestedBranch") or ui_state.params.get_bool("IsDevelopmentBranch")
     self._initialize_items()
-
-    self._scroller.insert_widget(0, self.blink_left_btn)
-    self._scroller.insert_widget(1, self.blink_right_btn)
-    for item in self.items[2:]:
+    for item in self.items:
       self._scroller.add_widget(item)
 
   def _initialize_items(self):
-    self.blink_left_btn = button_item(tr("Blink Left"), tr("BLINK"), tr("Blink the left turn signal once while the vehicle is stationary."),
-                                      callback=lambda: self._request_blinker_test("BlinkerTestLeft"))
-    self.blink_right_btn = button_item(tr("Blink Right"), tr("BLINK"), tr("Blink the right turn signal once while the vehicle is stationary."),
-                                       callback=lambda: self._request_blinker_test("BlinkerTestRight"))
-
     self.show_advanced_controls = toggle_item_sp(tr("Show Advanced Controls"),
                                                  tr("Toggle visibility of advanced sunnypilot controls.<br>This only changes the visibility of the toggles; " +
                                                     "it does not change the actual enabled/disabled state."), param="ShowAdvancedControls")
@@ -59,14 +49,8 @@ class DeveloperLayoutSP(DeveloperLayout):
 
     self.error_log_btn = button_item(tr("Error Log"), tr("VIEW"), tr("View the error log for sunnypilot crashes."), callback=self._on_error_log_clicked)
 
-    self.items: list = [self.blink_left_btn, self.blink_right_btn, self.show_advanced_controls, self.enable_github_runner_toggle,
+    self.items: list = [self.show_advanced_controls, self.enable_github_runner_toggle,
                         self.enable_copyparty_toggle, self.prebuilt_toggle, self.error_log_btn,]
-
-  @staticmethod
-  def _request_blinker_test(param):
-    other_param = "BlinkerTestRight" if param == "BlinkerTestLeft" else "BlinkerTestLeft"
-    ui_state.params.remove(other_param)
-    ui_state.params.put_bool(param, True)
 
   @staticmethod
   def _on_prebuilt_toggled(state):
@@ -101,10 +85,6 @@ class DeveloperLayoutSP(DeveloperLayout):
   def _update_state(self):
     disable_updates = ui_state.params.get_bool("DisableUpdates")
     show_advanced = ui_state.params.get_bool("ShowAdvancedControls")
-
-    gv80 = ui_state.CP is not None and ui_state.CP.carFingerprint == "GENESIS_GV80_2025"
-    self.blink_left_btn.action_item.set_enabled(gv80)
-    self.blink_right_btn.action_item.set_enabled(gv80)
 
     if (prebuilt_file := os.path.exists(PREBUILT_PATH)) != ui_state.params.get_bool("QuickBootToggle"):
       ui_state.params.put_bool("QuickBootToggle", prebuilt_file)
