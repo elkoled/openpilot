@@ -26,6 +26,7 @@ from openpilot.sunnypilot.mads.helpers import set_alternative_experience, set_ca
 from openpilot.sunnypilot.selfdrive.car import interfaces as sunnypilot_interfaces
 
 REPLAY = "REPLAY" in os.environ
+FORCED_FINGERPRINT = "GENESIS_GV80_2025"
 
 EventName = log.OnroadEvent.EventName
 
@@ -106,7 +107,8 @@ class Car:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
           cached_params = _cached_params
 
-      fixed_fingerprint = (self.params.get("CarPlatformBundle") or {}).get("platform", None)
+      fixed_fingerprint = FORCED_FINGERPRINT
+      cloudlog.warning(f"Forcing development fingerprint: {fixed_fingerprint}")
       init_params_list_sp = sunnypilot_interfaces.initialize_params(self.params)
 
       self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params,
