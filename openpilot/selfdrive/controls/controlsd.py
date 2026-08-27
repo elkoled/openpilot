@@ -29,6 +29,8 @@ LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
+BLINKER_TEST_DURATION_FRAMES = 50
+BLINKER_TEST_POLL_FRAMES = 10
 
 
 class Controls(ControlsExt):
@@ -52,6 +54,9 @@ class Controls(ControlsExt):
     self.steer_limited_by_safety = False
     self.curvature = 0.0
     self.desired_curvature = 0.0
+    self.blinker_test_counter = 0
+    self.blinker_test_direction = LaneChangeDirection.none
+    self.blinker_test_poll_counter = 0
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -127,6 +132,25 @@ class Controls(ControlsExt):
     if model_v2.meta.laneChangeState != LaneChangeState.off:
       CC.leftBlinker = model_v2.meta.laneChangeDirection == LaneChangeDirection.left
       CC.rightBlinker = model_v2.meta.laneChangeDirection == LaneChangeDirection.right
+
+    # Developer-only stationary one-shot test for vehicles with CAN-controlled blinkers.
+    if self.blinker_test_poll_counter % BLINKER_TEST_POLL_FRAMES == 0:
+      left_requested = self.params.get_bool("BlinkerTestLeft")
+      right_requested = self.params.get_bool("BlinkerTestRight")
+      if left_requested or right_requested:
+        self.params.remove("BlinkerTestLeft")
+        self.params.remove("BlinkerTestRight")
+        if CS.standstill or abs(CS.vEgo) < 0.1:
+          self.blinker_test_direction = LaneChangeDirection.left if left_requested else LaneChangeDirection.right
+          self.blinker_test_counter = BLINKER_TEST_DURATION_FRAMES
+    self.blinker_test_poll_counter += 1
+
+    if self.blinker_test_counter > 0:
+      CC.leftBlinker = self.blinker_test_direction == LaneChangeDirection.left
+      CC.rightBlinker = self.blinker_test_direction == LaneChangeDirection.right
+      self.blinker_test_counter -= 1
+      if self.blinker_test_counter == 0:
+        self.blinker_test_direction = LaneChangeDirection.none
 
     if not CC.latActive:
       self.LaC.reset()
