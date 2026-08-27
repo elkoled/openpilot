@@ -66,6 +66,11 @@ class DeveloperLayoutMici(NavScroller):
     self._ssh_keys_btn = BigButton("SSH keys", "Not set" if not github_username else github_username, icon=txt_ssh)
     self._ssh_keys_btn.set_click_callback(ssh_keys_callback)
 
+    self._blink_left_btn = BigButton("blink left", "blink once")
+    self._blink_left_btn.set_click_callback(lambda: self._request_blinker_test("BlinkerTestLeft"))
+    self._blink_right_btn = BigButton("blink right", "blink once")
+    self._blink_right_btn.set_click_callback(lambda: self._request_blinker_test("BlinkerTestRight"))
+
     # adb, ssh, ssh keys, debug mode, joystick debug mode, longitudinal maneuver mode, ip address
     # ******** Main Scroller ********
     self._adb_toggle = BigCircleParamControl(gui_app.texture("icons_mici/adb_short.png", 82, 82), "AdbEnabled", icon_offset=(0, 12))
@@ -87,6 +92,8 @@ class DeveloperLayoutMici(NavScroller):
                                                                                gui_app.set_show_fps(checked)))
 
     self._scroller.add_widgets([
+      self._blink_left_btn,
+      self._blink_right_btn,
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys_btn,
@@ -130,6 +137,12 @@ class DeveloperLayoutMici(NavScroller):
 
     ui_state.add_offroad_transition_callback(self._update_toggles)
 
+  @staticmethod
+  def _request_blinker_test(param: str):
+    other_param = "BlinkerTestRight" if param == "BlinkerTestLeft" else "BlinkerTestLeft"
+    ui_state.params.remove(other_param)
+    ui_state.params.put_bool(param, True)
+
   def _update_state(self):
     super()._update_state()
     self._ssh_fetcher.update()
@@ -140,6 +153,10 @@ class DeveloperLayoutMici(NavScroller):
 
   def _update_toggles(self):
     ui_state.update_params()
+
+    gv80 = ui_state.CP is not None and ui_state.CP.carFingerprint == "GENESIS_GV80_2025"
+    self._blink_left_btn.set_enabled(gv80)
+    self._blink_right_btn.set_enabled(gv80)
 
     # CP gating
     if ui_state.CP is not None:
