@@ -6,6 +6,9 @@ export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 
+# Temporary for 2025-26 Genesis GV80 longitudinal bring-up.
+export FINGERPRINT="GENESIS_GV80_2025"
+
 # models get lower priority than ui
 # - ui is ~5ms
 # - modeld is 20ms
