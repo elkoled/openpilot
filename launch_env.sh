@@ -6,9 +6,6 @@ export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 
-# Temporary for 2025-26 Genesis GV80 longitudinal bring-up.
-export FINGERPRINT="GENESIS_GV80_2025"
-
 # models get lower priority than ui
 # - ui is ~5ms
 # - modeld is 20ms
@@ -23,3 +20,7 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
+
+# Temporary for 2025-26 Genesis GV80 longitudinal bring-up. Keep this last so
+# the selected platform cannot be overridden by earlier environment setup.
+export FINGERPRINT="GENESIS_GV80_2025"
