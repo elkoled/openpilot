@@ -111,21 +111,28 @@ def uds_action(log: JsonLog, action: str, request: bytes, fn: Callable[[], objec
   return result
 
 
-def restore(client: UdsClient, log: JsonLog, message_type: MESSAGE_TYPE) -> bool:
-  results = []
-  for action, request, fn in (
-    ("restore_communications", bytes([0x28, CONTROL_TYPE.ENABLE_RX_ENABLE_TX, message_type]),
-     lambda: client.communication_control(CONTROL_TYPE.ENABLE_RX_ENABLE_TX, message_type)),
-    ("restore_dtc", bytes([0x85, DTC_SETTING_TYPE.ON]), lambda: client.control_dtc_setting(DTC_SETTING_TYPE.ON)),
-    ("restore_default_session", bytes([0x10, SESSION_TYPE.DEFAULT]),
-     lambda: client.diagnostic_session_control(SESSION_TYPE.DEFAULT)),
-  ):
-    try:
-      uds_action(log, action, request, fn)
-      results.append(True)
-    except Exception:
-      results.append(False)
-  return all(results)
+def raw_uds_single_frame(panda: Panda, log: JsonLog, addr: int, bus: int, payload: bytes, action: str):
+  if not 1 <= len(payload) <= 7:
+    raise ValueError("raw single-frame UDS payload must be 1..7 bytes")
+  frame = (bytes([len(payload)]) + payload).ljust(8, b"\x00")
+  log.write("uds_suppressed_request", action=action, addr=addr, bus=bus,
+            request=payload.hex(), can_data=frame.hex())
+  panda.can_send(addr, frame, bus)
+
+
+def restore_suppressed(panda: Panda, log: JsonLog, addr: int, bus: int, message_type: MESSAGE_TYPE,
+                       dtc_was_disabled: bool):
+  """Restore state without waiting for replies that can be delayed and mis-associated."""
+  raw_uds_single_frame(panda, log, addr, bus,
+                       bytes([0x28, 0x80 | CONTROL_TYPE.ENABLE_RX_ENABLE_TX, message_type]),
+                       "restore_communications_suppress_response")
+  time.sleep(0.1)
+  if dtc_was_disabled:
+    raw_uds_single_frame(panda, log, addr, bus, bytes([0x85, 0x80 | DTC_SETTING_TYPE.ON]),
+                         "restore_dtc_suppress_response")
+    time.sleep(0.1)
+  raw_uds_single_frame(panda, log, addr, bus, bytes([0x10, 0x80 | SESSION_TYPE.DEFAULT]),
+                       "restore_default_session_suppress_response")
 
 
 def clear_rx(panda: Panda, receiver: BoundedCanReceiver, log: JsonLog, reason: str):
@@ -204,7 +211,7 @@ def main() -> int:
   parser.add_argument("--serial", help="panda serial; required when more than one panda is connected")
   parser.add_argument("--bus", type=int, default=1)
   parser.add_argument("--addr", type=lambda x: int(x, 0), default=0x730)
-  parser.add_argument("--timeout", type=float, default=0.5)
+  parser.add_argument("--timeout", type=float, default=2.0)
   parser.add_argument("--max-attempts", type=int, default=108)
   parser.add_argument("--max-runtime", type=float, default=180.0)
   parser.add_argument("--hold-seconds", type=float, default=15.0,
@@ -224,7 +231,7 @@ def main() -> int:
                       default=Path(f"/tmp/hyundai-adas-campaign-{int(time.time())}.jsonl"))
   args = parser.parse_args()
 
-  if not 0 <= args.bus <= 3 or not 0 < args.timeout <= 2 or args.max_attempts <= 0 or args.max_runtime <= 0 or \
+  if not 0 <= args.bus <= 3 or not 0 < args.timeout <= 5 or args.max_attempts <= 0 or args.max_runtime <= 0 or \
      not 0.1 <= args.verify_window <= 10 or args.verify_min_baseline <= 0 or args.verify_min_bus_frames <= 0:
     parser.error("invalid campaign bounds")
   verify_addrs = tuple(dict.fromkeys(args.verify_addrs or DEFAULT_VERIFY_ADDRS))
@@ -245,7 +252,7 @@ def main() -> int:
     carlog.setLevel("DEBUG")
     # ELM327 safety permits diagnostic addressing but blocks normal actuation frames.
     panda.set_safety_mode(CarParams.SafetyModel.elm327, 1)
-    client = UdsClient(panda, args.addr, bus=args.bus, timeout=args.timeout, response_pending_timeout=2.0)
+    client = UdsClient(panda, args.addr, bus=args.bus, timeout=args.timeout, response_pending_timeout=5.0)
     # UdsClient stores the bound callback, so replace it after construction.
     client._can_client.rx = receiver
     log.write("campaign_start", addr=args.addr, bus=args.bus, serial=panda.get_serial()[0],
@@ -276,7 +283,9 @@ def main() -> int:
           log.write("security_seed", level=level, result="positive", seed_length=len(seed))
         except Exception as exc:
           log.write("security_seed", level=level, **describe_exception(exc))
-      restore(client, log, MESSAGE_TYPE.NORMAL)
+      restore_suppressed(panda, log, args.addr, args.bus, MESSAGE_TYPE.NORMAL, True)
+      time.sleep(0.5)
+      clear_rx(panda, receiver, log, "after_security_probe_restore")
 
     attempts = build_attempts(args.include_programming_session, args.include_safety_session, args.include_soft_reset)
     for index, attempt in enumerate(attempts[:args.max_attempts], 1):
@@ -303,19 +312,30 @@ def main() -> int:
           uds_action(log, "dtc_off", bytes([0x85, DTC_SETTING_TYPE.OFF]),
                      lambda: client.control_dtc_setting(DTC_SETTING_TYPE.OFF), attempt=index)
         time.sleep(attempt.settle_s)
-        uds_action(log, "communication_control", request,
-                   lambda: client.communication_control(attempt.control, attempt.message_type), attempt=index,
-                   control=attempt.control.name, message_type=attempt.message_type.name)
-        log.write("communication_control_positive", index=index, name=attempt.name, request=request.hex())
+        communication_response = "positive"
+        try:
+          uds_action(log, "communication_control", request,
+                     lambda: client.communication_control(attempt.control, attempt.message_type), attempt=index,
+                     control=attempt.control.name, message_type=attempt.message_type.name)
+          log.write("communication_control_positive", index=index, name=attempt.name, request=request.hex())
+        except MessageTimeoutError:
+          # Some ECUs apply DisableTx before emitting the positive response. A
+          # timeout is therefore ambiguous; cyclic traffic is the authority.
+          communication_response = "no_response"
+          log.write("communication_control_ambiguous", index=index, name=attempt.name, request=request.hex(),
+                    reason="no_response_verify_can_traffic")
 
         clear_rx(panda, receiver, log, "before_post_disable_capture")
         after_disable = capture_can(receiver, log, "post_disable", args.bus, verify_addrs, args.verify_window)
         disabled, observed = verify_silence(log, baseline, after_disable, args.verify_min_baseline,
                                             args.verify_min_bus_frames, "post_disable")
         if not disabled:
-          log.write("attempt_result", index=index, result="positive_but_not_disabled")
-          restore(client, log, attempt.message_type)
-          time.sleep(0.1)
+          log.write("attempt_result", index=index, result="not_disabled", communication_response=communication_response)
+          restore_suppressed(panda, log, args.addr, args.bus, attempt.message_type, attempt.dtc_off)
+          time.sleep(0.5)
+          clear_rx(panda, receiver, log, "after_failed_attempt_restore")
+          client = UdsClient(panda, args.addr, bus=args.bus, timeout=args.timeout, response_pending_timeout=5.0)
+          client._can_client.rx = receiver
           continue
 
         success = attempt
@@ -332,7 +352,8 @@ def main() -> int:
         while time.monotonic() < deadline:
           time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
           if time.monotonic() < deadline:
-            uds_action(log, "hold_tester_present", b"\x3e\x00", client.tester_present, attempt=index)
+            raw_uds_single_frame(panda, log, args.addr, args.bus, b"\x3e\x80",
+                                 "hold_tester_present_suppress_response")
 
         clear_rx(panda, receiver, log, "before_end_hold_capture")
         end_hold = capture_can(receiver, log, "end_hold", args.bus, verify_addrs, args.verify_window)
@@ -341,18 +362,19 @@ def main() -> int:
         if not held_disabled:
           final_status = "DISABLE_DID_NOT_HOLD"
 
-        restored = restore(client, log, attempt.message_type)
+        restore_suppressed(panda, log, args.addr, args.bus, attempt.message_type, attempt.dtc_off)
+        time.sleep(0.5)
         clear_rx(panda, receiver, log, "before_post_restore_capture")
         after_restore = capture_can(receiver, log, "post_restore", args.bus, verify_addrs, args.verify_window)
         recovery_verified = verify_recovery(log, baseline, after_restore, observed, args.verify_min_baseline)
-        if held_disabled and restored and recovery_verified:
+        if held_disabled and recovery_verified:
           final_status = "VERIFIED_DISABLED_AND_RESTORED"
         elif held_disabled:
           final_status = "VERIFIED_DISABLED_RESTORE_UNVERIFIED"
         break
       except Exception as exc:
         log.write("attempt_result", index=index, **describe_exception(exc))
-        restore(client, log, attempt.message_type)
+        restore_suppressed(panda, log, args.addr, args.bus, attempt.message_type, attempt.dtc_off)
         if success is attempt:
           final_status = "VERIFIED_DISABLED_TEST_ERROR"
           break
