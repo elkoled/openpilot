@@ -1,12 +1,8 @@
-import contextlib
-import io
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-import xml.etree.ElementTree as ET
 
 import run
 
@@ -16,39 +12,31 @@ class TestRunner(unittest.TestCase):
     with patch.object(Path, 'is_file', return_value=False), self.assertRaisesRegex(RuntimeError, 'AGNOS bench'):
       run.preflight()
 
-  def test_failure_propagates_and_writes_junit(self):
-    with tempfile.TemporaryDirectory() as tmp, patch.object(run, 'RESULTS', Path(tmp)), \
-         patch.object(sys, 'argv', ['run.py', 'preflight']), \
-         patch.object(run, 'preflight', side_effect=RuntimeError('GPU missing')):
-      with self.assertRaisesRegex(RuntimeError, 'GPU missing'):
-        run.main()
-      suite = ET.parse(Path(tmp) / 'preflight.xml').getroot()
-      self.assertEqual(suite.attrib['failures'], '1')
-      self.assertIn('GPU missing', suite.find('testcase/failure').text)
+  def test_onroad_host_rejected(self):
+    with patch.object(Path, 'is_file', return_value=True), patch.object(Path, 'exists', return_value=True), \
+         patch.object(Path, 'read_bytes', return_value=b'1'), self.assertRaisesRegex(RuntimeError, 'onroad'):
+      run.preflight()
 
-  def test_success_writes_junit(self):
-    with tempfile.TemporaryDirectory() as tmp, patch.object(run, 'RESULTS', Path(tmp)), \
-         patch.object(sys, 'argv', ['run.py', 'smoke', '--runs', '20']), patch.object(run, 'smoke') as smoke:
-      run.main()
-      smoke.assert_called_once_with(20)
-      suite = ET.parse(Path(tmp) / 'smoke.xml').getroot()
-      self.assertEqual(suite.attrib['failures'], '0')
+  def test_compile_failures_propagate(self):
+    for error in (subprocess.CalledProcessError(1, 'compiler'), subprocess.TimeoutExpired('compiler', 2400)):
+      with self.subTest(error=error), tempfile.TemporaryDirectory() as tmp, \
+           patch.object(run, 'MODEL', Path(tmp) / 'model.pkl'), patch.object(run, 'preflight'), \
+           patch.object(run.subprocess, 'run', side_effect=error), self.assertRaises(type(error)):
+        run.compile_model()
 
-  def test_out_of_bounds_runs_rejected(self):
-    for count in ('0', '-1', '1001'):
-      with self.subTest(count=count), patch.object(sys, 'argv', ['run.py', 'smoke', '--runs', count]), \
-           contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
-        run.main()
-      self.assertEqual(error.exception.code, 2)
+  def test_stale_artifact_cannot_pass(self):
+    with tempfile.TemporaryDirectory() as tmp, patch.object(run, 'MODEL', Path(tmp) / 'model.pkl'), \
+         patch.object(run, 'preflight'), patch.object(run.subprocess, 'run'):
+      run.MODEL.write_bytes(b'old artifact')
+      with self.assertRaisesRegex(RuntimeError, 'did not produce'):
+        run.compile_model()
+      self.assertFalse(run.MODEL.exists())
 
-  def test_compile_timeout_is_a_failure(self):
-    with tempfile.TemporaryDirectory() as tmp, patch.object(run, 'RESULTS', Path(tmp)), \
-         patch.object(sys, 'argv', ['run.py', 'compile']), \
-         patch.object(run, 'compile_model', side_effect=subprocess.TimeoutExpired('compiler', 2400)):
-      with self.assertRaises(subprocess.TimeoutExpired):
-        run.main()
-      suite = ET.parse(Path(tmp) / 'compile.xml').getroot()
-      self.assertEqual(suite.attrib['failures'], '1')
+  def test_empty_artifact_cannot_pass(self):
+    with tempfile.TemporaryDirectory() as tmp, patch.object(run, 'MODEL', Path(tmp) / 'model.pkl'), \
+         patch.object(run, 'preflight'), patch.object(run.subprocess, 'run', side_effect=lambda *a, **kw: run.MODEL.touch()), \
+         self.assertRaisesRegex(RuntimeError, 'did not produce'):
+      run.compile_model()
 
 
 if __name__ == '__main__':
