@@ -171,8 +171,7 @@ node {
   env.GIT_COMMIT = revision.GIT_COMMIT
   properties([disableConcurrentBuilds()])
         deviceStage("chestnut", "mici-chestnut-ci", ["UNSAFE=1", "CHESTNUT=1"], [
-          step("build", "./openpilot/selfdrive/test/chestnut.sh"),
-          step("model replay", "openpilot/selfdrive/test/process_replay/model_replay.py --chestnut"),
+          step("model replay", "openpilot/selfdrive/test/process_replay/model_replay.py --chestnut --regen-cache --update"),
         ])
 
 }
