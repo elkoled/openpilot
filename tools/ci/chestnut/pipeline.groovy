@@ -19,7 +19,7 @@ set -eu
 [ "$CHESTNUT_HOST" = comma-de2e7866 ]
 ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 \
   -o StrictHostKeyChecking=accept-new -i "$key_file" "comma@$CHESTNUT_HOST" \
-  "timeout --signal=TERM --kill-after=30s 3600 bash -s -- '$CHESTNUT_HOST' '$CHESTNUT_COMMIT' '$CHESTNUT_REPOSITORY'" \
+  "timeout --signal=TERM --kill-after=30s 3600 bash -s -- '$CHESTNUT_HOST' '$CHESTNUT_COMMIT' '$CHESTNUT_REPOSITORY' '$(date +%s)'" \
   < tools/ci/chestnut/remote.sh
 '''
               } finally {

@@ -17,6 +17,8 @@ fi
 # Also excludes accidental overlap with a second SSH invocation on the same bench.
 exec 9>/data/chestnut-ci.lock
 flock -n 9
+# Set the clock after reboot, as the other device runners do.
+sudo date -u -s "@$4"
 # AGNOS supplies Python dependencies through its system virtual environment.
 set +u
 source /etc/profile
