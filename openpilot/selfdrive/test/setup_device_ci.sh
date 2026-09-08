@@ -60,7 +60,7 @@ export GIT_LFS_SKIP_SMUDGE=1
 pull_lfs() {
   if [ -n "${CHESTNUT:-}" ]
   then
-    git -c lfs.concurrenttransfers=1 -c lfs.transfer.maxretries=1 lfs pull --exclude=''
+    git lfs pull --exclude=''
     return
   fi
 
