@@ -164,17 +164,10 @@ node {
   env.PYTHONWARNINGS = "error"
   env.TEST_DIR = "/data/openpilot"
   env.SOURCE_DIR = "/data/openpilot_source/"
-  def revision = checkout(scm)
-  env.GIT_BRANCH = revision.GIT_BRANCH
-  env.GIT_COMMIT = revision.GIT_COMMIT
-
-  // The fork's development branch exercises only the new, dedicated bench.
-  if (env.BRANCH_NAME == 'chestnut-jenkins-ci') {
-    properties([disableConcurrentBuilds()])
-    load('tools/ci/chestnut/pipeline.groovy').run(revision.GIT_COMMIT, revision.GIT_URL)
-    return
-  }
   setupCredentials()
+
+  env.GIT_BRANCH = checkout(scm).GIT_BRANCH
+  env.GIT_COMMIT = checkout(scm).GIT_COMMIT
 
   def excludeBranches = ['__nightly', 'devel', 'devel-staging',
                          'release-tizi', 'release-tizi-staging', 'release-mici', 'release-mici-staging', 'testing-closet*', 'hotfix-*']
@@ -211,7 +204,17 @@ node {
     if (!env.BRANCH_NAME.matches(excludeRegex)) {
     parallel (
       'Chestnut': {
-        load('tools/ci/chestnut/pipeline.groovy').run(revision.GIT_COMMIT, revision.GIT_URL)
+        deviceStage("chestnut", "mici-chestnut-ci", ["UNSAFE=1", "CHESTNUT=1"], [
+          step("compile big model", """
+test -f /data/disable_openpilot_autostart
+test "\$(cat /data/params/d/IsOffroad)" = 1
+python -c 'from openpilot.common.hardware import HARDWARE; from openpilot.selfdrive.modeld.helpers import chestnut_present; assert HARDWARE.get_device_type() == "mici" and chestnut_present()'
+trap 'rm -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl*' EXIT
+rm -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
+scons -j2 --cache-disable openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
+test -s openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
+"""),
+        ])
       },
       'onroad tests': {
         deviceStage("onroad", "tizi-needs-can", ["UNSAFE=1"], [
