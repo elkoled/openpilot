@@ -1,0 +1,65 @@
+// Dedicated, single-executor MICI agent with a powered Chestnut attached.
+pipeline {
+  agent { label 'mici-chestnut-ci' }
+  options {
+    skipDefaultCheckout(true)
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+  parameters {
+    choice(name: 'SMOKE_RUNS', choices: ['20', '100', '1000'], description: 'Synthetic GPU inference iterations')
+  }
+  environment {
+    GIT_LFS_SKIP_SMUDGE = '1'
+    CI = '1'
+    PYTHONUNBUFFERED = '1'
+    DEV = 'USB+AMD:LLVM'
+    WARP_DEV = 'QCOM'
+    FLOAT16 = '1'
+    JIT_BATCH_SIZE = '0'
+    GMMU = '0'
+    TC_OPT = '2'
+    OMP_NUM_THREADS = '1'
+    OPENBLAS_NUM_THREADS = '1'
+  }
+  stages {
+    stage('Checkout fork revision') {
+      steps {
+        checkout scm
+        sh '''#!/usr/bin/env bash
+set -euo pipefail
+git submodule sync -- tinygrad_repo
+git submodule update --init --depth 1 -- tinygrad_repo
+ln -sfn tinygrad_repo/tinygrad tinygrad
+mkdir -p results
+rm -f results/*.xml results/*.log results/*.json results/big_driving_tinygrad.pkl
+git rev-parse HEAD > results/commit.txt
+'''
+      }
+    }
+    stage('Check dedicated hardware') {
+      steps { sh 'python3 tools/ci/chestnut/run.py preflight' }
+    }
+    stage('Fetch big model') {
+      steps {
+        timeout(time: 10, unit: 'MINUTES') {
+          sh '''git -c lfs.concurrenttransfers=1 -c lfs.transfer.maxretries=1 lfs pull --include="openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx*" --exclude=""'''
+        }
+      }
+    }
+    stage('Compile and check JIT round trip') {
+      steps { sh 'python3 tools/ci/chestnut/run.py compile' }
+    }
+    stage('Run compiled big model on Chestnut') {
+      steps { sh 'python3 tools/ci/chestnut/run.py smoke --runs "$SMOKE_RUNS"' }
+    }
+  }
+  post {
+    always {
+      junit allowEmptyResults: true, testResults: 'results/*.xml'
+      archiveArtifacts allowEmptyArchive: true, artifacts: 'results/*.txt,results/*.json,results/*.log,results/*.xml'
+      sh 'rm -f results/big_driving_tinygrad.pkl'
+    }
+  }
+}
