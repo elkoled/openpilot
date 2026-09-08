@@ -16,6 +16,10 @@ fi
 # Also excludes accidental overlap with a second SSH invocation on the same bench.
 exec 9>/data/chestnut-ci.lock
 flock -n 9
+# AGNOS supplies Python dependencies through its system virtual environment.
+set +u
+source /etc/profile
+set -u
 export GIT_LFS_SKIP_SMUDGE=1
 export CI=1 PYTHONUNBUFFERED=1
 export DEV=USB+AMD:LLVM FRAME_DEV=CPU FLOAT16=1 JIT_BATCH_SIZE=0 GMMU=0 TC_OPT=2 TC_MIN_GLOBALS=32
@@ -36,9 +40,10 @@ cd source
 git fetch --depth=1 --no-tags --no-recurse-submodules origin "$commit"
 git checkout --detach --force "$commit"
 [[ "$(git rev-parse HEAD)" == "$commit" ]]
-git submodule sync -- tinygrad_repo
-git submodule update --init --depth=1 -- tinygrad_repo
+git submodule sync -- tinygrad_repo opendbc_repo
+git submodule update --init --depth=1 -- tinygrad_repo opendbc_repo
 ln -sfn tinygrad_repo/tinygrad tinygrad
+ln -sfn opendbc_repo/opendbc opendbc
 export PYTHONPATH="$PWD"
 export CHESTNUT_RESULTS="/data/chestnut-ci-workspace/reports/$commit"
 mkdir -p "$CHESTNUT_RESULTS"
