@@ -170,18 +170,8 @@ node {
   env.GIT_BRANCH = revision.GIT_BRANCH
   env.GIT_COMMIT = revision.GIT_COMMIT
   properties([disableConcurrentBuilds()])
-        deviceStage("chestnut", "mici-chestnut-ci", ["UNSAFE=1", "CHESTNUT=1"], [
-          step("compile big model", """
-git show HEAD:openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx
-sha256sum openpilot/selfdrive/modeld/models/big_driving_supercombo.onnx
-test -f /data/disable_openpilot_autostart
-test "\$(cat /data/params/d/IsOffroad)" = 1
-python -c 'from openpilot.common.hardware import HARDWARE; from openpilot.selfdrive.modeld.helpers import chestnut_present; assert HARDWARE.get_device_type() == "mici" and chestnut_present()'
-trap 'rm -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl*' EXIT
-rm -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
-scons -j2 --cache-disable openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
-test -s openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
-"""),
+        deviceStage("chestnut compile", "mici-chestnut-ci", ["UNSAFE=1", "CHESTNUT=1"], [
+          step("compile big model", "./openpilot/selfdrive/test/compile_chestnut.sh"),
         ])
 
 }
