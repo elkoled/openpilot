@@ -172,6 +172,8 @@ node {
   properties([disableConcurrentBuilds()])
         deviceStage("chestnut", "mici-chestnut-ci", ["UNSAFE=1", "CHESTNUT=1"], [
           step("compile big model", "./openpilot/selfdrive/test/chestnut.sh"),
+          step("build", "cd openpilot/system/manager && ./build.py"),
+          step("model replay", "openpilot/selfdrive/test/process_replay/model_replay.py --chestnut --update"),
         ])
 
 }
