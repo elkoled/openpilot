@@ -30,8 +30,8 @@ Resources. No Jenkins agent or Java installation is needed on either device.
 
 The pipeline locks device 1 and checks its hostname. Its checkout is separate
 from the installed openpilot: `/data/chestnut-ci-workspace/source`. It fetches the
-exact fork SHA and pinned tinygrad submodule. Only big-model LFS objects are
-fetched (about 1.8 GB initially), with one transfer and bounded retries. There
+exact fork SHA and pinned tinygrad/opendbc submodules. Only big-model LFS objects are
+fetched (766 MB at the initial tested revision), with one transfer and bounded retries. There
 are no fleet-data downloads, firmware flashes, or changes to boot configuration.
 Reports include the commit, hostname, compile log, JUnit XML and timing JSON.
 The hardware session has a one-hour limit, with a 40-minute compiler timeout.
