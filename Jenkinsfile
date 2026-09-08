@@ -164,10 +164,17 @@ node {
   env.PYTHONWARNINGS = "error"
   env.TEST_DIR = "/data/openpilot"
   env.SOURCE_DIR = "/data/openpilot_source/"
-  setupCredentials()
+  def revision = checkout(scm)
+  env.GIT_BRANCH = revision.GIT_BRANCH
+  env.GIT_COMMIT = revision.GIT_COMMIT
 
-  env.GIT_BRANCH = checkout(scm).GIT_BRANCH
-  env.GIT_COMMIT = checkout(scm).GIT_COMMIT
+  // The fork's development branch exercises only the new, dedicated bench.
+  if (env.BRANCH_NAME == 'chestnut-jenkins-ci') {
+    properties([disableConcurrentBuilds()])
+    load('tools/ci/chestnut/pipeline.groovy').run(revision.GIT_COMMIT, revision.GIT_URL)
+    return
+  }
+  setupCredentials()
 
   def excludeBranches = ['__nightly', 'devel', 'devel-staging',
                          'release-tizi', 'release-tizi-staging', 'release-mici', 'release-mici-staging', 'testing-closet*', 'hotfix-*']
@@ -203,6 +210,9 @@ node {
 
     if (!env.BRANCH_NAME.matches(excludeRegex)) {
     parallel (
+      'Chestnut': {
+        load('tools/ci/chestnut/pipeline.groovy').run(revision.GIT_COMMIT, revision.GIT_URL)
+      },
       'onroad tests': {
         deviceStage("onroad", "tizi-needs-can", ["UNSAFE=1"], [
           step("build openpilot", "cd openpilot/system/manager && ./build.py"),
