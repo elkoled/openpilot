@@ -159,51 +159,17 @@ def step(String name, String cmd, Map args = [:]) {
   return [name, cmd, args]
 }
 
+// Development job: exercise the upstream Chestnut stage on the dedicated bench.
 node {
   env.CI = "1"
   env.PYTHONWARNINGS = "error"
-  env.TEST_DIR = "/data/openpilot"
-  env.SOURCE_DIR = "/data/openpilot_source/"
+  env.TEST_DIR = "/data/chestnut-ci-workspace/test"
+  env.SOURCE_DIR = "/data/chestnut-ci-workspace/source/"
   setupCredentials()
-
-  env.GIT_BRANCH = checkout(scm).GIT_BRANCH
-  env.GIT_COMMIT = checkout(scm).GIT_COMMIT
-
-  def excludeBranches = ['__nightly', 'devel', 'devel-staging',
-                         'release-tizi', 'release-tizi-staging', 'release-mici', 'release-mici-staging', 'testing-closet*', 'hotfix-*']
-  def excludeRegex = excludeBranches.join('|').replaceAll('\\*', '.*')
-
-  if (env.BRANCH_NAME != 'master' && !env.BRANCH_NAME.contains('__jenkins_loop_')) {
-    properties([
-        disableConcurrentBuilds(abortPrevious: true)
-    ])
-  }
-
-  try {
-    if (env.BRANCH_NAME == 'devel-staging') {
-      deviceStage("build release-tizi-staging", "tizi-needs-can", [], [
-        step("build release-tizi-staging", "RELEASE_BRANCH=release-tizi-staging,release-mici-staging $SOURCE_DIR/tools/release/build_release.sh"),
-      ])
-    }
-
-    if (env.BRANCH_NAME == '__nightly') {
-      parallel (
-        'nightly': {
-          deviceStage("build nightly", "tizi-needs-can", [], [
-            step("build nightly", "RELEASE_BRANCH=nightly $SOURCE_DIR/tools/release/build_release.sh"),
-          ])
-        },
-        'nightly-dev': {
-          deviceStage("build nightly-dev", "tizi-needs-can", [], [
-            step("build nightly-dev", "PANDA_DEBUG_BUILD=1 RELEASE_BRANCH=nightly-dev $SOURCE_DIR/tools/release/build_release.sh"),
-          ])
-        },
-      )
-    }
-
-    if (!env.BRANCH_NAME.matches(excludeRegex)) {
-    parallel (
-      'Chestnut': {
+  def revision = checkout(scm)
+  env.GIT_BRANCH = revision.GIT_BRANCH
+  env.GIT_COMMIT = revision.GIT_COMMIT
+  properties([disableConcurrentBuilds()])
         deviceStage("chestnut", "mici-chestnut-ci", ["UNSAFE=1", "CHESTNUT=1"], [
           step("compile big model", """
 test -f /data/disable_openpilot_autostart
@@ -215,61 +181,5 @@ scons -j2 --cache-disable openpilot/selfdrive/modeld/models/big_driving_tinygrad
 test -s openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl.chunkmanifest
 """),
         ])
-      },
-      'onroad tests': {
-        deviceStage("onroad", "tizi-needs-can", ["UNSAFE=1"], [
-          step("build openpilot", "cd openpilot/system/manager && ./build.py"),
-          step("check dirty", "tools/release/check-dirty.sh"),
-          step("onroad tests", "./openpilot/selfdrive/test/test_onroad.py", [timeout: 60]),
-        ])
-      },
-      'HW + Unit Tests': {
-        deviceStage("tizi-hardware", "tizi-common", ["UNSAFE=1"], [
-          step("build", "cd openpilot/system/manager && ./build.py"),
-          step("test power draw", "./openpilot/selfdrive/test/test_power_draw.py"),
-          step("test encoder", "./openpilot/system/loggerd/tests/test_encoder.py", [diffPaths: ["openpilot/system/loggerd/"]]),
-          step("test manager", "./openpilot/system/manager/test/test_manager.py"),
-        ])
-      },
-      'camerad OX03C10': {
-        deviceStage("OX03C10", "tizi-ox03c10", ["UNSAFE=1"], [
-          step("build", "cd openpilot/system/manager && ./build.py"),
-          step("test pandad", "./openpilot/selfdrive/pandad/tests/test_pandad.py"),
-          step("test camerad", "./openpilot/system/camerad/test/test_camerad.py", [timeout: 90]),
-        ])
-      },
-      'camerad OS04C10': {
-        deviceStage("OS04C10", "tici-os04c10", ["UNSAFE=1"], [
-          step("build", "cd openpilot/system/manager && ./build.py"),
-          step("test pandad", "./openpilot/selfdrive/pandad/tests/test_pandad.py"),
-          step("test camerad", "./openpilot/system/camerad/test/test_camerad.py", [timeout: 90]),
-        ])
-      },
-      'sensord': {
-        deviceStage("LSM + MMC", "tizi-lsmc", ["UNSAFE=1"], [
-          step("build", "cd openpilot/system/manager && ./build.py"),
-          step("test sensord", "./openpilot/system/sensord/tests/test_sensord.py"),
-        ])
-      },
-      'replay': {
-        deviceStage("model-replay", "tizi-replay", ["UNSAFE=1"], [
-          step("build", "cd openpilot/system/manager && ./build.py", [diffPaths: ["openpilot/selfdrive/modeld/", "tinygrad_repo", "openpilot/selfdrive/test/process_replay/model_replay.py"]]),
-          step("model replay", "openpilot/selfdrive/test/process_replay/model_replay.py", [diffPaths: ["openpilot/selfdrive/modeld/", "tinygrad_repo", "openpilot/selfdrive/test/process_replay/model_replay.py"]]),
-        ])
-      },
-      'tizi': {
-        deviceStage("tizi", "tizi", ["UNSAFE=1"], [
-          step("build openpilot", "cd openpilot/system/manager && ./build.py"),
-          step("test pandad loopback", "./openpilot/selfdrive/pandad/tests/test_pandad_loopback.py"),
-          step("test pandad spi", "./openpilot/selfdrive/pandad/tests/test_pandad_spi.py"),
-          step("test amp", "./openpilot/common/hardware/comma/tests/test_amplifier.py"),
-        ])
-      },
 
-    )
-    }
-  } catch (Exception e) {
-    currentBuild.result = 'FAILED'
-    throw e
-  }
 }
