@@ -92,7 +92,7 @@ class TestStreamSession(OpenpilotTestCase):
     assert response[0] == 403
 
   def test_pinball_joystick_shape(self):
-    assert valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [1, 0], "buttons": []}})
-    assert not valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [2, 0], "buttons": []}})
+    assert valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [1, 0, 1], "buttons": []}})
+    assert not valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [2, 0, 0], "buttons": []}})
     assert not valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [1], "buttons": []}})
     assert not valid_pinball_joystick({"type": "sendcan", "data": []})

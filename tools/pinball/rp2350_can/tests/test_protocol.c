@@ -14,7 +14,7 @@ static void test_known_vector(void) {
 
 static void test_every_single_bit_corruption_is_rejected(void) {
   uint8_t good[8];
-  pinball_make_command(7, PINBALL_LEFT_PRESSED | PINBALL_RIGHT_PRESSED, good);
+  pinball_make_command(7, PINBALL_LEFT_PRESSED | PINBALL_RIGHT_PRESSED | PINBALL_START_PRESSED, good);
   for (size_t byte = 0; byte < 8; ++byte) {
     for (unsigned bit = 0; bit < 8; ++bit) {
       uint8_t bad[8];

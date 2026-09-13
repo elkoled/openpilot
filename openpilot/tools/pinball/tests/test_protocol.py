@@ -9,12 +9,12 @@ def test_command_contract():
 
 
 def test_all_button_states():
-  assert [command(i, i & 1, i & 2)[4] for i in range(4)] == [0, 1, 2, 3]
+  assert [command(i, i & 1, i & 2, i & 4)[4] for i in range(8)] == list(range(8))
 
 
 def test_axes_are_strict_and_missing_axes_release():
-  assert pressed_axes([]) == (False, False)
-  assert pressed_axes([0.5, 0.50001]) == (False, True)
+  assert pressed_axes([]) == (False, False, False)
+  assert pressed_axes([0.5, 0.50001, 1]) == (False, True, True)
 
 
 def test_status_validation():
@@ -22,7 +22,7 @@ def test_status_validation():
   raw[7] = crc8(raw[:7])
   assert parse_status(bytes(raw)) == {
     "sequence": 7, "left_pressed": False, "right_pressed": True,
-    "watchdog_released": True, "rx_count": 0x1234,
+    "start_pressed": False, "watchdog_released": True, "rx_count": 0x1234,
   }
   raw[4] ^= 1
   assert parse_status(bytes(raw)) is None

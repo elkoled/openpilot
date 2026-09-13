@@ -17,6 +17,8 @@ required = {
   "left_press": r"LEFT_PRESS_US\s+1770u",
   "right_release": r"RIGHT_RELEASE_US\s+1420u",
   "right_press": r"RIGHT_PRESS_US\s+1220u",
+  "start_gpio": r"START_GPIO\s+4u",
+  "start_direct": r"gpio_put\(START_GPIO, \(state & PINBALL_START_PRESSED\) != 0u\)",
   "pwm_period": r"PWM_PERIOD_US\s+3003u",
 }
 text = (ROOT / "protocol.h").read_text() + (ROOT / "main.c").read_text()

@@ -4,8 +4,8 @@ const test = require("node:test");
 const { createInputState, joystickMessage, sideForCode, streamRequest } = require("./protocol.js");
 
 test("wire message has the exact testJoystick contract", () => {
-  assert.deepEqual(JSON.parse(joystickMessage(true, false)), {
-    type: "testJoystick", data: { axes: [1, 0], buttons: [] },
+  assert.deepEqual(JSON.parse(joystickMessage(true, false, true)), {
+    type: "testJoystick", data: { axes: [1, 0, 1], buttons: [] },
   });
 });
 
@@ -24,7 +24,8 @@ test("keyboard mappings reject unrelated keys", () => {
   assert.equal(sideForCode("KeyZ"), "left");
   assert.equal(sideForCode("ArrowRight"), "right");
   assert.equal(sideForCode("Slash"), "right");
-  assert.equal(sideForCode("Space"), null);
+  assert.equal(sideForCode("Space"), "start");
+  assert.equal(sideForCode("Enter"), "start");
 });
 
 test("press/release is immediate, simultaneous, and deduplicated", () => {
@@ -33,9 +34,11 @@ test("press/release is immediate, simultaneous, and deduplicated", () => {
   state.update("left", true);
   state.update("left", true);
   state.update("right", true);
+  state.update("start", true);
   state.update("left", false);
   state.update("right", false);
-  assert.deepEqual(sent, [[1, 0], [1, 1], [0, 1], [0, 0]]);
+  state.update("start", false);
+  assert.deepEqual(sent, [[1, 0, 0], [1, 1, 0], [1, 1, 1], [0, 1, 1], [0, 0, 1], [0, 0, 0]]);
 });
 
 test("forced disconnect release always emits neutral", () => {
@@ -44,6 +47,6 @@ test("forced disconnect release always emits neutral", () => {
   state.update("left", true);
   state.releaseAll(true);
   state.releaseAll(true);
-  assert.deepEqual(sent, [[1, 0], [0, 0], [0, 0]]);
-  assert.deepEqual(state.snapshot(), { left: false, right: false });
+  assert.deepEqual(sent, [[1, 0, 0], [0, 0, 0], [0, 0, 0]]);
+  assert.deepEqual(state.snapshot(), { left: false, right: false, start: false });
 });

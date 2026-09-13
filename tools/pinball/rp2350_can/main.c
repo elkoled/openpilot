@@ -9,6 +9,7 @@
 
 #define LEFT_GPIO 14u
 #define RIGHT_GPIO 15u
+#define START_GPIO 4u
 #define LEFT_RELEASE_US 1570u
 #define LEFT_PRESS_US 1770u
 #define RIGHT_RELEASE_US 1420u
@@ -17,11 +18,12 @@
 
 static pinball_controller_t controller;
 
-static void apply_servos(uint8_t state) {
+static void apply_outputs(uint8_t state) {
   pwm_set_gpio_level(LEFT_GPIO,
       (state & PINBALL_LEFT_PRESSED) ? LEFT_PRESS_US : LEFT_RELEASE_US);
   pwm_set_gpio_level(RIGHT_GPIO,
       (state & PINBALL_RIGHT_PRESSED) ? RIGHT_PRESS_US : RIGHT_RELEASE_US);
+  gpio_put(START_GPIO, (state & PINBALL_START_PRESSED) != 0u);
 }
 
 static void init_servos(void) {
@@ -32,7 +34,10 @@ static void init_servos(void) {
   pwm_config_set_clkdiv(&config, (float)clock_get_hz(clk_sys) / 1000000.0f);
   pwm_config_set_wrap(&config, PWM_PERIOD_US - 1u);
   pwm_init(slice, &config, true);
-  apply_servos(0u);
+  gpio_init(START_GPIO);
+  gpio_set_dir(START_GPIO, GPIO_OUT);
+  gpio_put(START_GPIO, 0);
+  apply_outputs(0u);
 }
 
 static void send_status(void) {
@@ -62,7 +67,7 @@ int main(void) {
     if (xl2515_receive(&can_id, data, &length)) {
       if (can_id == PINBALL_COMMAND_ID && length == PINBALL_FRAME_LEN &&
           pinball_apply_command(&controller, data, now_ms)) {
-        apply_servos(controller.state);
+        apply_outputs(controller.state);
       } else if (can_id != PINBALL_COMMAND_ID || length != PINBALL_FRAME_LEN) {
         controller.faults |= PINBALL_FAULT_BAD_FRAME;
       }
@@ -71,7 +76,7 @@ int main(void) {
     }
 
     if (pinball_watchdog_poll(&controller, now_ms)) {
-      apply_servos(0u);
+      apply_outputs(0u);
       send_status();
       last_status_ms = now_ms;
     }

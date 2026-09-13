@@ -29,7 +29,7 @@ def main() -> None:
   signal.signal(signal.SIGINT, stop)
   signal.signal(signal.SIGTERM, stop)
   sequence = 0
-  left = right = False
+  left = right = start = False
   last_input_ns = 0
   last_ack_ns = 0
   last_heartbeat_ns = 0
@@ -41,12 +41,12 @@ def main() -> None:
       start_ns = time.monotonic_ns()
       joystick.update(0)
       if joystick.updated["testJoystick"]:
-        left, right = pressed_axes(joystick["testJoystick"].axes)
+        left, right, start = pressed_axes(joystick["testJoystick"].axes)
         last_input_ns = start_ns
       elif last_input_ns == 0 or start_ns - last_input_ns > 150_000_000:
-        left = right = False
+        left = right = start = False
 
-      panda.can_send(COMMAND_ID, command(sequence, left, right), 0)
+      panda.can_send(COMMAND_ID, command(sequence, left, right, start), 0)
       if start_ns - last_heartbeat_ns >= 500_000_000:
         panda.send_heartbeat(False)
         last_heartbeat_ns = start_ns
@@ -60,14 +60,14 @@ def main() -> None:
 
       if sequence % 100 == 0:
         ack_age_ms = (start_ns - last_ack_ns) / 1e6 if last_ack_ns else -1
-        print(f"state={int(left)}{int(right)} seq={sequence} rp_rx={rx_count} ack_age_ms={ack_age_ms:.1f}", flush=True)
+        print(f"state={int(left)}{int(right)}{int(start)} seq={sequence} rp_rx={rx_count} ack_age_ms={ack_age_ms:.1f}", flush=True)
       sequence = (sequence + 1) & 0xFF
       delay = 0.01 - (time.monotonic_ns() - start_ns) / 1e9
       if delay > 0:
         time.sleep(delay)
   finally:
     for _ in range(3):
-      panda.can_send(COMMAND_ID, command(sequence, False, False), 0)
+      panda.can_send(COMMAND_ID, command(sequence, False, False, False), 0)
       sequence = (sequence + 1) & 0xFF
     panda.set_safety_mode(CarParams.SafetyModel.noOutput)
     print("PINBALL CAN STOPPED: release sent, Panda no-output restored", flush=True)

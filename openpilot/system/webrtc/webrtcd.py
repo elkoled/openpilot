@@ -159,7 +159,7 @@ def valid_pinball_joystick(payload: Any) -> bool:
   if not isinstance(data, dict) or set(data) != {"axes", "buttons"}:
     return False
   axes, buttons = data["axes"], data["buttons"]
-  return isinstance(axes, list) and len(axes) == 2 and all(type(v) in (int, float) and v in (0, 1) for v in axes) \
+  return isinstance(axes, list) and len(axes) == 3 and all(type(v) in (int, float) and v in (0, 1) for v in axes) \
     and isinstance(buttons, list) and len(buttons) == 0
 
 

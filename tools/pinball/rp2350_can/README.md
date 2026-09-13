@@ -8,7 +8,8 @@ There is no artificial hold or bump delay.
 
 The onboard XL2515 uses SPI1: INT GP8, CS GP9, SCK GP10, MOSI GP11, MISO GP12.
 The firmware uses GP14 for the left servo and GP15 for the right servo. Both run
-at 333 Hz (3003 us period):
+at 333 Hz (3003 us period). GP4 drives the START solenoid directly: HIGH only
+while START is held, LOW on release.
 
 | Output | Released | Pressed |
 | --- | ---: | ---: |
@@ -30,7 +31,7 @@ Command `0x200`:
 | 0..1 | magic `50 42` |
 | 2 | protocol version `01` |
 | 3 | rolling sequence, increment for every command |
-| 4 | state: bit 0 left, bit 1 right; other bits must be zero |
+| 4 | state: bit 0 left, bit 1 right, bit 2 START; other bits must be zero |
 | 5 | bitwise inverse of byte 4 |
 | 6 | reserved; must be zero |
 | 7 | CRC-8/SAE-J1850 over bytes 0..6 (poly 1D, init/xorout FF) |

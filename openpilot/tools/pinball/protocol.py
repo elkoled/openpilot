@@ -7,8 +7,10 @@ MAGIC = (0x50, 0x42)  # "PB"
 VERSION = 1
 
 
-def pressed_axes(axes) -> tuple[bool, bool]:
-  return (len(axes) > 0 and axes[0] > 0.5, len(axes) > 1 and axes[1] > 0.5)
+def pressed_axes(axes) -> tuple[bool, bool, bool]:
+  return (len(axes) > 0 and axes[0] > 0.5,
+          len(axes) > 1 and axes[1] > 0.5,
+          len(axes) > 2 and axes[2] > 0.5)
 
 
 def crc8(data: bytes) -> int:
@@ -20,8 +22,8 @@ def crc8(data: bytes) -> int:
   return crc ^ 0xFF
 
 
-def command(sequence: int, left: bool, right: bool) -> bytes:
-  state = int(bool(left)) | (int(bool(right)) << 1)
+def command(sequence: int, left: bool, right: bool, start: bool = False) -> bytes:
+  state = int(bool(left)) | (int(bool(right)) << 1) | (int(bool(start)) << 2)
   payload = bytes((*MAGIC, VERSION, sequence & 0xFF, state, state ^ 0xFF, 0))
   return payload + bytes((crc8(payload),))
 
@@ -34,6 +36,7 @@ def parse_status(payload: bytes) -> dict[str, int | bool] | None:
     "sequence": payload[3],
     "left_pressed": bool(state & 1),
     "right_pressed": bool(state & 2),
+    "start_pressed": bool(state & 4),
     "watchdog_released": bool(state & 0x80),
     "rx_count": payload[5] | (payload[6] << 8),
   }
