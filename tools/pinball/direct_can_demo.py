@@ -8,7 +8,10 @@ from opendbc.car.structs import CarParams
 from openpilot.cereal import messaging
 from panda import Panda
 
-from openpilot.tools.pinball.protocol import COMMAND_ID, STATUS_ID, command, parse_status, pressed_axes
+try:
+  from openpilot.tools.pinball.protocol import COMMAND_ID, STATUS_ID, command, parse_status, pressed_axes
+except ImportError:  # standalone /tmp deployment on an unchanged comma checkout
+  from pinball_protocol import COMMAND_ID, STATUS_ID, command, parse_status, pressed_axes
 
 
 def main() -> None:

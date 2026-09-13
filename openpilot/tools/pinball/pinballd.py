@@ -8,7 +8,10 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.selfdrive.pandad import can_list_to_can_capnp
 from opendbc.car.can_definitions import CanData
 
-from openpilot.tools.pinball.protocol import CAN_BUS, COMMAND_ID, command, pressed_axes
+try:
+  from openpilot.tools.pinball.protocol import CAN_BUS, COMMAND_ID, command, pressed_axes
+except ImportError:  # Standalone /tmp deployment for the hardware demo.
+  from protocol import CAN_BUS, COMMAND_ID, command, pressed_axes
 
 INPUT_TIMEOUT_NS = 150_000_000
 
