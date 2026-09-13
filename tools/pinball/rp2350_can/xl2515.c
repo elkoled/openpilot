@@ -99,10 +99,10 @@ bool xl2515_init_500k(void) {
   deselect_chip();
   sleep_ms(10);
 
-  /* Waveshare's official 16 MHz oscillator table: 500 kbit/s. */
+  /* Waveshare's official XL2515 table entry for 500 kbit/s (index KBPS500). */
   write_register(REG_CNF1, 0x00u);
-  write_register(REG_CNF2, 0x92u);
-  write_register(REG_CNF3, 0x02u);
+  write_register(REG_CNF2, 0x9eu);
+  write_register(REG_CNF3, 0x03u);
 
   /* Exact standard-ID filter for 0x200 in RX buffer 0. */
   write_register(REG_RXF0SIDH, (uint8_t)(0x200u >> 3));
