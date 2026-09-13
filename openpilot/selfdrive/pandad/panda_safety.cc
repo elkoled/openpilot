@@ -2,8 +2,13 @@
 #include "openpilot/cereal/messaging/messaging.h"
 #include "common/swaglog.h"
 
-void PandaSafety::configureSafetyMode(bool is_onroad) {
-  if (is_onroad && !safety_configured_) {
+void PandaSafety::configureSafetyMode(bool is_onroad, bool pinball_mode) {
+  if (pinball_mode && !safety_configured_) {
+    LOGW("setting demo all-output safety model for pinball mode");
+    panda_->set_safety_model(cereal::CarParams::SafetyModel::ALL_OUTPUT);
+    initialized_ = true;
+    safety_configured_ = true;
+  } else if (is_onroad && !safety_configured_) {
     updateMultiplexingMode();
 
     auto car_params = fetchCarParams();
@@ -12,7 +17,7 @@ void PandaSafety::configureSafetyMode(bool is_onroad) {
       setSafetyMode(car_params);
       safety_configured_ = true;
     }
-  } else if (!is_onroad) {
+  } else if (!is_onroad && !pinball_mode) {
     initialized_ = false;
     safety_configured_ = false;
     log_once_ = false;

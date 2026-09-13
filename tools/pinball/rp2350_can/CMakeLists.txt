@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.13)
+set(PICO_BOARD pico2 CACHE STRING "Board type")
+include(pico_sdk_import.cmake)
+project(pinball_rp2350_can C CXX ASM)
+pico_sdk_init()
+
+add_executable(pinball_rp2350_can main.c protocol.c xl2515.c)
+target_include_directories(pinball_rp2350_can PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_link_libraries(pinball_rp2350_can pico_stdlib hardware_clocks hardware_pwm hardware_spi)
+pico_enable_stdio_uart(pinball_rp2350_can 0)
+pico_enable_stdio_usb(pinball_rp2350_can 1)
+pico_add_extra_outputs(pinball_rp2350_can)

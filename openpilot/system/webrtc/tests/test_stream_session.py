@@ -7,7 +7,7 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.cereal import messaging, log
 from teleoprtc.tracks import VIDEO_CLOCK_RATE
 
-from openpilot.system.webrtc.webrtcd import CerealOutgoingMessageProxy, CerealIncomingMessageProxy, ServerState, handle_get_stream
+from openpilot.system.webrtc.webrtcd import CerealOutgoingMessageProxy, CerealIncomingMessageProxy, ServerState, handle_get_stream, valid_pinball_joystick
 from openpilot.system.webrtc.device.video import LiveStreamVideoStreamTrack
 
 
@@ -85,3 +85,14 @@ class TestStreamSession(OpenpilotTestCase):
     response = self.loop.run_until_complete(handle_get_stream(ServerState(), b"{}", "text/plain"))
 
     assert response == (415, b'{"error": "unsupported media type"}', "application/json; charset=utf-8")
+
+  def test_incoming_control_allowlist(self):
+    body = {"sdp": "", "cameras": [], "enabled": True, "bridge_services_in": ["sendcan"]}
+    response = self.loop.run_until_complete(handle_get_stream(ServerState(), json.dumps(body).encode(), "application/json"))
+    assert response[0] == 403
+
+  def test_pinball_joystick_shape(self):
+    assert valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [1, 0], "buttons": []}})
+    assert not valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [2, 0], "buttons": []}})
+    assert not valid_pinball_joystick({"type": "testJoystick", "data": {"axes": [1], "buttons": []}})
+    assert not valid_pinball_joystick({"type": "sendcan", "data": []})

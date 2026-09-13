@@ -10,7 +10,7 @@ void pandad_main_thread(std::string serial);
 class PandaSafety {
 public:
   PandaSafety(Panda *panda) : panda_(panda) {}
-  void configureSafetyMode(bool is_onroad);
+  void configureSafetyMode(bool is_onroad, bool pinball_mode = false);
 
 private:
   void updateMultiplexingMode();
