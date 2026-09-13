@@ -13,25 +13,17 @@ try:
 except ImportError:  # Standalone /tmp deployment for the hardware demo.
   from protocol import CAN_BUS, COMMAND_ID, command, pressed_axes
 
-INPUT_TIMEOUT_NS = 150_000_000
-
-
 def main() -> None:
   sm = messaging.SubMaster(["testJoystick"])
   pm = messaging.PubMaster(["sendcan"])
   rk = Ratekeeper(100, print_delay_threshold=None)
   sequence = 0
-  last_input_ns = 0
   left = right = start = False
 
   while True:
     sm.update(0)
-    now = time.monotonic_ns()
     if sm.updated["testJoystick"]:
       left, right, start = pressed_axes(sm["testJoystick"].axes)
-      last_input_ns = now
-    elif last_input_ns == 0 or now - last_input_ns > INPUT_TIMEOUT_NS:
-      left = right = start = False
 
     # A 100 Hz heartbeat gives the RP controller an independent 200 ms watchdog.
     payload = command(sequence, left, right, start)

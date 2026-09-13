@@ -30,7 +30,6 @@ def main() -> None:
   signal.signal(signal.SIGTERM, stop)
   sequence = 0
   left = right = start = False
-  last_input_ns = 0
   last_ack_ns = 0
   last_heartbeat_ns = 0
   rx_count = 0
@@ -42,9 +41,6 @@ def main() -> None:
       joystick.update(0)
       if joystick.updated["testJoystick"]:
         left, right, start = pressed_axes(joystick["testJoystick"].axes)
-        last_input_ns = start_ns
-      elif last_input_ns == 0 or start_ns - last_input_ns > 150_000_000:
-        left = right = start = False
 
       panda.can_send(COMMAND_ID, command(sequence, left, right, start), 0)
       if start_ns - last_heartbeat_ns >= 500_000_000:
