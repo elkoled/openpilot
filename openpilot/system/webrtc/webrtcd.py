@@ -15,6 +15,7 @@ import uuid
 import logging
 import signal
 import threading
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from typing import Any
@@ -26,6 +27,8 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.cereal import messaging, log
 
 SESSION_TIMEOUT_SECONDS = 300
+PINBALL_WEB_ROOT = Path(__file__).with_name("pinball")
+ALLOWED_INCOMING_SERVICES = frozenset({"testJoystick"})
 
 
 # ice candidate parser for logging
@@ -147,6 +150,17 @@ class CerealIncomingMessageProxy:
     msg = messaging.new_message(msg_type, size=size)
     setattr(msg, msg_type, msg_data)
     self.pm.send(msg_type, msg)
+
+
+def valid_pinball_joystick(payload: Any) -> bool:
+  if not isinstance(payload, dict) or set(payload) != {"type", "data"} or payload["type"] != "testJoystick":
+    return False
+  data = payload["data"]
+  if not isinstance(data, dict) or set(data) != {"axes", "buttons"}:
+    return False
+  axes, buttons = data["axes"], data["buttons"]
+  return isinstance(axes, list) and len(axes) == 2 and all(type(v) in (int, float) and v in (0, 1) for v in axes) \
+    and isinstance(buttons, list) and len(buttons) == 0
 
 
 class DynamicPubMaster(messaging.PubMaster):
@@ -326,6 +340,9 @@ class StreamSession:
           case _:
             if msg_type not in self.incoming_bridge_services:
               return
+            if msg_type == "testJoystick" and not valid_pinball_joystick(payload):
+              self.logger.warning("Rejected malformed testJoystick message")
+              return
             if self.incoming_bridge is not None:
               self.incoming_bridge.send(message)
     except Exception:
@@ -427,6 +444,8 @@ async def handle_get_stream(state: ServerState, raw_body: bytes, content_type: s
 
   stream_dict = state.streams
   body = StreamRequestBody(**json.loads(raw_body))
+  if not set(body.bridge_services_in).issubset(ALLOWED_INCOMING_SERVICES):
+    return _json_response({"error": "incoming service not allowed"}, status=403)
 
   async with state.stream_lock:
     # don't remove existing connection on prewarm request
@@ -514,6 +533,12 @@ class WebrtcdHandler(BaseHTTPRequestHandler):
 
   # path -> allowed methods (aiohttp registered POST /stream, POST /notify, GET /schema + its auto HEAD)
   _routes = {
+    "/": ("GET", "HEAD"),
+    "/pinball": ("GET", "HEAD"),
+    "/pinball/": ("GET", "HEAD"),
+    "/pinball/app.js": ("GET", "HEAD"),
+    "/pinball/protocol.js": ("GET", "HEAD"),
+    "/pinball/style.css": ("GET", "HEAD"),
     "/schema": ("GET", "HEAD"),
     "/stream": ("POST",),
     "/notify": ("POST",),
@@ -539,7 +564,13 @@ class WebrtcdHandler(BaseHTTPRequestHandler):
     allowed = self._routes.get(parsed.path)
 
     try:
-      if allowed is None:
+      if parsed.path in ("/", "/pinball", "/pinball/"):
+        result = (200, (PINBALL_WEB_ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
+      elif parsed.path.startswith("/pinball/"):
+        filename = parsed.path.removeprefix("/pinball/")
+        content_type = "text/javascript; charset=utf-8" if filename.endswith(".js") else "text/css; charset=utf-8"
+        result = (200, (PINBALL_WEB_ROOT / filename).read_bytes(), content_type)
+      elif allowed is None:
         result = _json_response({"error": "not found"}, status=404)
       elif self.command not in allowed:
         result = _json_response({"error": "method not allowed"}, status=405)

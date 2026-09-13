@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>Comma Pinball</title>
+  <link rel="stylesheet" href="/pinball/style.css">
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">LAN CONTROL</span><h1>Comma Pinball</h1></div>
+    <div class="connection"><span id="status" data-kind="connecting">Starting…</span><button id="connect">Reconnect</button></div>
+  </header>
+  <main>
+    <section class="video primary"><video id="road" autoplay muted playsinline></video><span>ROAD</span></section>
+    <section class="video"><video id="wideRoad" autoplay muted playsinline></video><span>WIDE ROAD</span></section>
+  </main>
+  <footer>
+    <button class="flipper" data-side="left"><strong>LEFT</strong><small>← or Z</small></button>
+    <p>Hold to press · release to release<br>Both flippers work together</p>
+    <button class="flipper" data-side="right"><strong>RIGHT</strong><small>→ or /</small></button>
+  </footer>
+  <script src="/pinball/protocol.js"></script>
+  <script src="/pinball/app.js"></script>
+</body>
+</html>
