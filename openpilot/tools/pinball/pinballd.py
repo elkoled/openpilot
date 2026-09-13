@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Bridge WebRTC testJoystick messages to the dedicated pinball CAN contract."""
 
-import time
-
 from openpilot.cereal import messaging
 from openpilot.common.realtime import Ratekeeper
 from openpilot.selfdrive.pandad import can_list_to_can_capnp
