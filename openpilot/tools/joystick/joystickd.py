@@ -16,7 +16,8 @@ MAX_LAT_ACCEL = 3.0
 
 
 def pinball_button_states(axes):
-  values = list(axes[:3]) + [0.0] * (3 - len(axes))
+  values = list(axes)[:3]
+  values += [0.0] * (3 - len(values))
   return tuple(float(np.clip(value, 0, 1)) for value in values)
 
 
