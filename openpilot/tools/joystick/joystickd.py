@@ -15,6 +15,11 @@ LongCtrlState = car.CarControl.Actuators.LongControlState
 MAX_LAT_ACCEL = 3.0
 
 
+def pinball_button_states(axes):
+  values = list(axes[:3]) + [0.0] * (3 - len(axes))
+  return tuple(float(np.clip(value, 0, 1)) for value in values)
+
+
 def joystickd_thread():
   params = Params()
   cloudlog.info("joystickd is waiting for CarParams")
@@ -23,6 +28,7 @@ def joystickd_thread():
 
   sm = messaging.SubMaster(['carState', 'onroadEvents', 'vehicleParameters', 'selfdriveState', 'testJoystick'], frequency=1. / DT_CTRL)
   pm = messaging.PubMaster(['carControl', 'controlsState'])
+  pinball_axes = (0.0, 0.0, 0.0)
 
   rk = Ratekeeper(100, print_delay_threshold=None)
   while 1:
@@ -40,25 +46,28 @@ def joystickd_thread():
 
     actuators = CC.actuators
 
-    # reset joystick if it hasn't been received in a while
-    should_reset_joystick = sm.recv_frame['testJoystick'] == 0 or (sm.frame - sm.recv_frame['testJoystick'])*DT_CTRL > 0.2
-
-    if not should_reset_joystick:
-      joystick_axes = sm['testJoystick'].axes
+    if CP.brand == "pinball":
+      # Browser messages are state changes. Retain them until explicit release.
+      if sm.updated['testJoystick']:
+        pinball_axes = pinball_button_states(sm['testJoystick'].axes)
+      actuators.gas, actuators.brake, actuators.accel = pinball_axes
+      actuators.longControlState = LongCtrlState.pid
     else:
-      joystick_axes = [0.0, 0.0]
+      # reset joystick if it hasn't been received in a while
+      should_reset_joystick = sm.recv_frame['testJoystick'] == 0 or (sm.frame - sm.recv_frame['testJoystick'])*DT_CTRL > 0.2
+      joystick_axes = sm['testJoystick'].axes if not should_reset_joystick else [0.0, 0.0]
 
-    if CC.longActive:
-      actuators.accel = 4.0 * float(np.clip(joystick_axes[0], -1, 1))
-      actuators.longControlState = LongCtrlState.stopping if should_stop(sm['carState'].vEgo, actuators.accel) else LongCtrlState.pid
-      CC.cruiseControl.resume = actuators.accel > 0.0
+      if CC.longActive:
+        actuators.accel = 4.0 * float(np.clip(joystick_axes[0], -1, 1))
+        actuators.longControlState = LongCtrlState.stopping if should_stop(sm['carState'].vEgo, actuators.accel) else LongCtrlState.pid
+        CC.cruiseControl.resume = actuators.accel > 0.0
 
-    if CC.latActive:
-      max_curvature = MAX_LAT_ACCEL / max(sm['carState'].vEgo ** 2, 5)
-      max_angle = math.degrees(VM.get_steer_from_curvature(max_curvature, sm['carState'].vEgo, sm['vehicleParameters'].roll))
+      if CC.latActive:
+        max_curvature = MAX_LAT_ACCEL / max(sm['carState'].vEgo ** 2, 5)
+        max_angle = math.degrees(VM.get_steer_from_curvature(max_curvature, sm['carState'].vEgo, sm['vehicleParameters'].roll))
 
-      actuators.torque = float(np.clip(joystick_axes[1], -1, 1))
-      actuators.steeringAngleDeg, actuators.curvature = actuators.torque * max_angle, actuators.torque * -max_curvature
+        actuators.torque = float(np.clip(joystick_axes[1], -1, 1))
+        actuators.steeringAngleDeg, actuators.curvature = actuators.torque * max_angle, actuators.torque * -max_curvature
 
     pm.send('carControl', cc_msg)
 

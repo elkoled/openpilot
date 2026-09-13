@@ -161,7 +161,7 @@ void fill_panda_can_state(cereal::PandaState::PandaCanState::Builder &cs, const 
   cs.setCanCoreResetCnt(can_health.can_core_reset_cnt);
 }
 
-std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroad, bool spoofing_started, bool pinball_mode) {
+std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroad, bool spoofing_started) {
   // build msg
   MessageBuilder msg;
   auto evt = msg.initEvent();
@@ -194,13 +194,13 @@ std::optional<bool> send_panda_states(PubMaster *pm, Panda *panda, bool is_onroa
     panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
 
-  bool power_save_desired = !ignition_local && !pinball_mode;
+  bool power_save_desired = !ignition_local;
   if (((health.flags_pkt & HEALTH_FLAG_POWER_SAVE_ENABLED) != 0U) != power_save_desired) {
     panda->set_power_saving(power_save_desired);
   }
 
   // set safety mode to NO_OUTPUT when car is off or we're not onroad. ELM327 is an alternative if we want to leverage athenad/connect
-  bool should_close_relay = !pinball_mode && (!ignition_local || !is_onroad);
+  bool should_close_relay = !ignition_local || !is_onroad;
   if (should_close_relay && (health.safety_mode_pkt != (uint8_t)(cereal::CarParams::SafetyModel::NO_OUTPUT))) {
     panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
   }
@@ -258,8 +258,8 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
   pm->send("peripheralState", msg);
 }
 
-void process_panda_state(Panda *panda, PubMaster *pm, bool engaged, bool is_onroad, bool spoofing_started, bool pinball_mode) {
-  auto ignition_opt = send_panda_states(pm, panda, is_onroad, spoofing_started, pinball_mode);
+void process_panda_state(Panda *panda, PubMaster *pm, bool engaged, bool is_onroad, bool spoofing_started) {
+  auto ignition_opt = send_panda_states(pm, panda, is_onroad, spoofing_started);
   if (!ignition_opt) {
     LOGE("Failed to get ignition_opt");
     return;
@@ -361,7 +361,6 @@ void pandad_run(Panda *panda) {
   const bool no_fan_control = getenv("NO_FAN_CONTROL") != nullptr;
   const bool spoofing_started = getenv("STARTED") != nullptr;
   const bool fake_send = getenv("FAKESEND") != nullptr;
-  const bool pinball_mode = Params().getBool("PinballMode");
 
   // Start helper thread for event-driven sendcan.
   std::thread send_thread(can_send_thread, panda, fake_send);
@@ -389,8 +388,8 @@ void pandad_run(Panda *panda) {
       if (sm.updated("deviceState")) {
         is_onroad = sm["deviceState"].getDeviceState().getStarted();
       }
-      process_panda_state(panda, &pm, engaged, is_onroad, spoofing_started, pinball_mode);
-      panda_safety.configureSafetyMode(is_onroad, pinball_mode);
+      process_panda_state(panda, &pm, engaged, is_onroad, spoofing_started);
+      panda_safety.configureSafetyMode(is_onroad);
     }
 
     // Send out peripheralState at 2Hz
@@ -413,7 +412,7 @@ void pandad_run(Panda *panda) {
   }
 
   // Close relay on exit to prevent a fault
-  if ((is_onroad || pinball_mode) && !engaged) {
+  if (is_onroad && !engaged) {
     if (panda->connected()) {
       panda->set_safety_model(cereal::CarParams::SafetyModel::NO_OUTPUT);
     }
