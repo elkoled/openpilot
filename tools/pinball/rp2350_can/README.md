@@ -25,6 +25,9 @@ each physical end; the board has a termination selector.
 
 All frames are standard 11-bit CAN with exactly 8 data bytes.
 
+The deployed direct-control sender is also accepted as `0x200` with one data
+byte containing the same state bits (bit 0 left, bit 1 right, bit 2 START).
+
 Command `0x200`:
 
 | Byte | Meaning |

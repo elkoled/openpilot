@@ -20,6 +20,13 @@
 
 static pinball_controller_t controller;
 
+static void log_frame(uint16_t can_id, const uint8_t *data, uint8_t length, bool accepted) {
+  printf("RX id=0x%03x dlc=%u data=", can_id, length);
+  for (uint8_t i = 0; i < length; ++i) printf("%02x", data[i]);
+  printf(" accepted=%u state=%u faults=0x%02x\n",
+      accepted ? 1u : 0u, controller.state, controller.faults);
+}
+
 static void apply_outputs(uint8_t state) {
   pwm_set_gpio_level(LEFT_GPIO,
       (state & PINBALL_LEFT_PRESSED) ? LEFT_PRESS_US : LEFT_RELEASE_US);
@@ -56,28 +63,37 @@ int main(void) {
   init_servos();
   if (!xl2515_init_500k()) {
     controller.faults |= PINBALL_FAULT_CAN;
-    while (true) tight_loop_contents(); /* servos remain released */
+    while (true) {
+      printf("CAN_INIT_FAILED faults=0x%02x\n", controller.faults);
+      sleep_ms(1000); /* servos remain released */
+    }
   }
+  printf("READY can=500000 command=0x200 status=0x201 state=0\n");
 
   uint32_t last_status_ms = 0u;
+  uint32_t last_log_ms = 0u;
   while (true) {
     const uint32_t now_ms = to_ms_since_boot(get_absolute_time());
     uint16_t can_id;
     uint8_t data[8];
     uint8_t length;
     if (xl2515_receive(&can_id, data, &length)) {
-      if (can_id == PINBALL_COMMAND_ID && length == PINBALL_FRAME_LEN &&
-          pinball_apply_command(&controller, data, now_ms)) {
+      const bool accepted = can_id == PINBALL_COMMAND_ID &&
+                            ((length == 1u && pinball_apply_direct_state(&controller, data[0], now_ms)) ||
+                             (length == PINBALL_FRAME_LEN && pinball_apply_command(&controller, data, now_ms)));
+      if (accepted) {
         apply_outputs(controller.state);
-      } else if (can_id != PINBALL_COMMAND_ID || length != PINBALL_FRAME_LEN) {
+      } else {
         controller.faults |= PINBALL_FAULT_BAD_FRAME;
       }
+      log_frame(can_id, data, length, accepted);
       send_status();
       last_status_ms = now_ms;
     }
 
     if (pinball_watchdog_poll(&controller, now_ms)) {
       apply_outputs(0u);
+      printf("WATCHDOG_RELEASE faults=0x%02x\n", controller.faults);
       send_status();
       last_status_ms = now_ms;
     }
@@ -85,6 +101,11 @@ int main(void) {
       if (xl2515_error_flags() != 0u) controller.faults |= PINBALL_FAULT_CAN;
       send_status();
       last_status_ms = now_ms;
+    }
+    if ((uint32_t)(now_ms - last_log_ms) >= 1000u) {
+      printf("ALIVE state=%u rx=%u faults=0x%02x\n",
+          controller.state, controller.rx_count, controller.faults);
+      last_log_ms = now_ms;
     }
     tight_loop_contents();
   }

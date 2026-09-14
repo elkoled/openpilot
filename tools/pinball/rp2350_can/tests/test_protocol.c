@@ -95,6 +95,24 @@ static void test_all_button_states_and_status(void) {
   assert(status[7] == pinball_crc8(status, 7));
 }
 
+static void test_direct_one_byte_states(void) {
+  pinball_controller_t c = {0};
+  for (uint8_t state = 0; state <= PINBALL_STATE_MASK; ++state) {
+    assert(pinball_apply_direct_state(&c, state, 100u + state));
+    assert(c.state == state);
+    assert(c.last_command_ms == 100u + state);
+  }
+  assert(c.rx_count == 8u);
+  assert(!pinball_watchdog_poll(&c, 306u));
+  assert(pinball_watchdog_poll(&c, 307u));
+  assert(c.state == 0u);
+  assert(pinball_apply_direct_state(&c, PINBALL_STATE_MASK, 308u));
+  assert(!pinball_apply_direct_state(&c, 0x08u, 200u));
+  assert(c.state == PINBALL_STATE_MASK);
+  assert(c.last_command_ms == 308u);
+  assert(c.faults & PINBALL_FAULT_BAD_FRAME);
+}
+
 int main(void) {
   test_known_vector();
   test_every_single_bit_corruption_is_rejected();
@@ -102,6 +120,7 @@ int main(void) {
   test_watchdog_and_millis_wrap();
   test_bad_frame_never_changes_output_or_refreshes_watchdog();
   test_all_button_states_and_status();
+  test_direct_one_byte_states();
   puts("protocol tests: PASS");
   return 0;
 }

@@ -42,6 +42,7 @@ void pinball_make_command(uint8_t sequence, uint8_t state, uint8_t out[PINBALL_F
 bool pinball_command_valid(const uint8_t frame[PINBALL_FRAME_LEN]);
 bool pinball_apply_command(pinball_controller_t *controller,
                            const uint8_t frame[PINBALL_FRAME_LEN], uint32_t now_ms);
+bool pinball_apply_direct_state(pinball_controller_t *controller, uint8_t state, uint32_t now_ms);
 bool pinball_watchdog_poll(pinball_controller_t *controller, uint32_t now_ms);
 void pinball_make_status(const pinball_controller_t *controller,
                          uint8_t out[PINBALL_FRAME_LEN]);

@@ -59,6 +59,22 @@ bool pinball_apply_command(pinball_controller_t *controller,
   return true;
 }
 
+bool pinball_apply_direct_state(pinball_controller_t *controller, uint8_t state, uint32_t now_ms) {
+  if ((state & (uint8_t)~PINBALL_STATE_MASK) != 0u) {
+    controller->faults |= PINBALL_FAULT_BAD_FRAME;
+    return false;
+  }
+  controller->state = state;
+  controller->last_command_ms = now_ms;
+  controller->have_sequence = true;
+  controller->watchdog_active = false;
+  controller->faults &= (uint8_t)~(PINBALL_FAULT_BAD_FRAME |
+                                  PINBALL_FAULT_STALE_SEQUENCE |
+                                  PINBALL_FAULT_WATCHDOG);
+  controller->rx_count++;
+  return true;
+}
+
 bool pinball_watchdog_poll(pinball_controller_t *controller, uint32_t now_ms) {
   if (controller->have_sequence &&
       (uint32_t)(now_ms - controller->last_command_ms) >= PINBALL_WATCHDOG_MS) {

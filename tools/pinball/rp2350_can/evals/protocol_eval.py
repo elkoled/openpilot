@@ -22,6 +22,10 @@ required = {
   "start_press": r"START_PRESS_US\s+1220u",
   "start_pwm": r"pwm_set_gpio_level\(START_GPIO,\s*\n\s*\(state & PINBALL_START_PRESSED\) \? START_PRESS_US : START_RELEASE_US\)",
   "start_pwm_init": r"pwm_init\(pwm_gpio_to_slice_num\(START_GPIO\), &config, true\)",
+  "serial_ready": r'printf\("READY can=500000 command=0x200 status=0x201 state=0',
+  "serial_rx": r'printf\("RX id=0x%03x dlc=%u data=',
+  "serial_watchdog": r'printf\("WATCHDOG_RELEASE faults=0x%02x',
+  "serial_alive": r'printf\("ALIVE state=%u rx=%u faults=0x%02x',
   "pwm_period": r"PWM_PERIOD_US\s+3003u",
 }
 text = (ROOT / "protocol.h").read_text() + (ROOT / "main.c").read_text()
