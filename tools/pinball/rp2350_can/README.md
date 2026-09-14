@@ -8,13 +8,14 @@ There is no artificial hold or bump delay.
 
 The onboard XL2515 uses SPI1: INT GP8, CS GP9, SCK GP10, MOSI GP11, MISO GP12.
 The firmware uses GP14 for the left servo and GP15 for the right servo. Both run
-at 333 Hz (3003 us period). GP4 drives the START solenoid directly: HIGH only
-while START is held, LOW on release.
+at 333 Hz (3003 us period). GP4 drives the START servo with the same endpoints
+as the right flipper.
 
 | Output | Released | Pressed |
 | --- | ---: | ---: |
 | GP14 left | 1570 us | 1770 us |
 | GP15 right | 1420 us | 1220 us |
+| GP4 START | 1420 us | 1220 us |
 
 The servo supply must be external and appropriately sized. Join grounds. Connect
 CAN-H to CAN-H and CAN-L to CAN-L. A two-node bus needs 120 ohm termination at

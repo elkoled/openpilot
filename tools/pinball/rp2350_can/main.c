@@ -14,6 +14,8 @@
 #define LEFT_PRESS_US 1770u
 #define RIGHT_RELEASE_US 1420u
 #define RIGHT_PRESS_US 1220u
+#define START_RELEASE_US 1420u
+#define START_PRESS_US 1220u
 #define PWM_PERIOD_US 3003u /* 333.0003 Hz */
 
 static pinball_controller_t controller;
@@ -23,20 +25,19 @@ static void apply_outputs(uint8_t state) {
       (state & PINBALL_LEFT_PRESSED) ? LEFT_PRESS_US : LEFT_RELEASE_US);
   pwm_set_gpio_level(RIGHT_GPIO,
       (state & PINBALL_RIGHT_PRESSED) ? RIGHT_PRESS_US : RIGHT_RELEASE_US);
-  gpio_put(START_GPIO, (state & PINBALL_START_PRESSED) != 0u);
+  pwm_set_gpio_level(START_GPIO,
+      (state & PINBALL_START_PRESSED) ? START_PRESS_US : START_RELEASE_US);
 }
 
 static void init_servos(void) {
   gpio_set_function(LEFT_GPIO, GPIO_FUNC_PWM);
   gpio_set_function(RIGHT_GPIO, GPIO_FUNC_PWM);
-  const uint slice = pwm_gpio_to_slice_num(LEFT_GPIO);
+  gpio_set_function(START_GPIO, GPIO_FUNC_PWM);
   pwm_config config = pwm_get_default_config();
   pwm_config_set_clkdiv(&config, (float)clock_get_hz(clk_sys) / 1000000.0f);
   pwm_config_set_wrap(&config, PWM_PERIOD_US - 1u);
-  pwm_init(slice, &config, true);
-  gpio_init(START_GPIO);
-  gpio_set_dir(START_GPIO, GPIO_OUT);
-  gpio_put(START_GPIO, 0);
+  pwm_init(pwm_gpio_to_slice_num(LEFT_GPIO), &config, true);
+  pwm_init(pwm_gpio_to_slice_num(START_GPIO), &config, true);
   apply_outputs(0u);
 }
 

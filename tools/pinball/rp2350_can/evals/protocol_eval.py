@@ -18,7 +18,10 @@ required = {
   "right_release": r"RIGHT_RELEASE_US\s+1420u",
   "right_press": r"RIGHT_PRESS_US\s+1220u",
   "start_gpio": r"START_GPIO\s+4u",
-  "start_direct": r"gpio_put\(START_GPIO, \(state & PINBALL_START_PRESSED\) != 0u\)",
+  "start_release": r"START_RELEASE_US\s+1420u",
+  "start_press": r"START_PRESS_US\s+1220u",
+  "start_pwm": r"pwm_set_gpio_level\(START_GPIO,\s*\n\s*\(state & PINBALL_START_PRESSED\) \? START_PRESS_US : START_RELEASE_US\)",
+  "start_pwm_init": r"pwm_init\(pwm_gpio_to_slice_num\(START_GPIO\), &config, true\)",
   "pwm_period": r"PWM_PERIOD_US\s+3003u",
 }
 text = (ROOT / "protocol.h").read_text() + (ROOT / "main.c").read_text()
