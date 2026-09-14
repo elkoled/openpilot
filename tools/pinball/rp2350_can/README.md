@@ -43,7 +43,7 @@ Status/ack `0x201`:
 | 0..1 | magic `50 42` |
 | 2 | protocol version `01` |
 | 3 | last accepted sequence |
-| 4 | applied state in bits 0..1; watchdog-active flag in bit 7 |
+| 4 | applied state in bits 0..2; watchdog-active flag in bit 7 |
 | 5..6 | accepted-command count, unsigned little-endian 16-bit |
 | 7 | CRC-8/SAE-J1850 over bytes 0..6 |
 
