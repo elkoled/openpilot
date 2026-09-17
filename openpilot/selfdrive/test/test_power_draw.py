@@ -4,9 +4,11 @@ from collections import defaultdict, deque
 import time
 import unittest
 import numpy as np
+import usb1
 from dataclasses import dataclass
 from panda import Panda
 from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware.usb import CHESTNUT_USB_PRODUCT, get_usb_state, is_chestnut_usb_id
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.common.utils import tabulate
 
@@ -16,6 +18,7 @@ from opendbc.car.car_helpers import get_demo_car_params
 from openpilot.common.mock import mock_messages
 from openpilot.common.params import Params
 from openpilot.common.hardware.comma.power_monitor import get_power
+from openpilot.system.hardware.chestnut.monitoring import read_chestnut_state
 from openpilot.selfdrive.modeld.helpers import chestnut_present
 from openpilot.system.manager.process_config import managed_processes
 from openpilot.system.manager.manager import manager_cleanup
@@ -24,6 +27,21 @@ SAMPLE_TIME = 2       # seconds to sample power
 MAX_WARMUP_TIME = 30  # seconds to wait for SAMPLE_TIME consecutive valid samples
 MICI = HARDWARE.get_device_type() == "mici"
 CHESTNUT = chestnut_present()
+
+class ChestnutPowerMonitor:
+  HW_TYPE_CUATRO = Panda.HW_TYPE_CUATRO
+  def __init__(self):
+    d = [d for d in get_usb_state() if is_chestnut_usb_id(d['vendorId'], d['productId']) and d['product'] == CHESTNUT_USB_PRODUCT][0]
+    self.context = usb1.USBContext().open()
+    self.handle = self.context.openByVendorIDAndProductID(d['vendorId'], d['productId'])
+  def close(self):
+    self.handle.close()
+    self.context.close()
+  def get_type(self): return self.HW_TYPE_CUATRO
+  def health(self):
+    s = read_chestnut_state(self.handle).chestnutState
+    return {'voltage': s.supplyVoltage, 'current': s.supplyCurrent}
+
 
 @dataclass
 class Proc:
@@ -40,8 +58,9 @@ class Proc:
 
 # MICI readings exclude the separately powered Chestnut GPU.
 PROCS = [
-  Proc(['camerad'], 0.85 if MICI else 1.65, atol=0.4, msgs=['narrowRoadCameraState', 'wideRoadCameraState', 'cabinCameraState']),
-  Proc(['modeld'], 0.45 if MICI and CHESTNUT else 1.5, atol=0.2, msgs=['modelV2']),
+  Proc(['camerad'], 0. if MICI and CHESTNUT else 0.85 if MICI else 1.65, atol=0.4,
+       msgs=['narrowRoadCameraState', 'wideRoadCameraState', 'cabinCameraState']),
+  Proc(['modeld'], 35. if MICI and CHESTNUT else 1.5, atol=15. if MICI and CHESTNUT else 0.2, msgs=['modelV2']),
   Proc(['dmonitoringmodeld'], 0.65, atol=0.35, msgs=['driverStateV2']),
   Proc(['encoderd'], 0.23, msgs=[]),
 ]
@@ -53,7 +72,10 @@ class TestPowerDraw(OpenpilotTestCase):
   def setup_method(self):
     Params().put("CarParams", get_demo_car_params().to_bytes(), block=True)
     self.panda = None
-    if MICI:
+    if MICI and CHESTNUT:
+      self.panda = ChestnutPowerMonitor()
+      self.addCleanup(self.panda.close)
+    elif MICI:
       HARDWARE.reset_internal_panda()
       self.addCleanup(HARDWARE.reset_internal_panda)
       Panda.wait_for_panda(None, 30)
