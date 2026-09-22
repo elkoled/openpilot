@@ -85,17 +85,28 @@ jobs:
         max_attempts: 3
         command: cd ${{ github.workspace }}/ci-artifacts && git push origin process-replay --force
 
-    - name: Verify first replay reported missing refs
+    - name: Verify clean runner can use published refs
       run: |
-        test '${{ steps.replay.outcome }}' = failure
-        grep -F 'Failed to load reference' openpilot/selfdrive/test/process_replay/diff.txt
-        grep -F 'aebd8f1d4ea16066_000002d8--5850d3ea5c--2' openpilot/selfdrive/test/process_replay/diff.txt
+        test '${{ steps.replay.outcome }}' = success
         test "$(cat ci-artifacts/ref_commit)" = '${{ github.sha }}'
+    - name: Wait for raw GitHub ref pointer to update
+      timeout-minutes: 7
+      run: |
+        for attempt in $(seq 1 36); do
+          published=$(python -c 'from openpilot.selfdrive.test.process_replay.test_processes import BASE_URL, URLFile; print(URLFile(BASE_URL + "ref_commit", cache=False).read().decode().strip())')
+          echo "Raw GitHub ref_commit: $published"
+          if [ "$published" = '${{ github.sha }}' ]; then
+            exit 0
+          fi
+          sleep 10
+        done
+        exit 1
     - name: Replay against published refs without local replay outputs
       timeout-minutes: 20
       run: |
         mv openpilot/selfdrive/test/process_replay/fakedata /tmp/first-replay
         openpilot/selfdrive/test/process_replay/test_processes.py -j$(nproc)
+        grep -F 'tested against commit ${{ github.sha }}' openpilot/selfdrive/test/process_replay/diff.txt
     - name: Upload verification reports
       if: always()
       uses: actions/upload-artifact@v7
