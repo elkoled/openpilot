@@ -47,6 +47,15 @@ MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_TIMEOUT = 60
 
 
+def discard_chestnut_dependencies() -> None:
+  # Host buffers can retain waits on the failed GPU after modeld switches models.
+  opened = tuple(Device._opened_devices)
+  failed = [Device[name] for name in opened if name.split(':')[0] == 'AMD']
+  for name in opened:
+    for device in failed:
+      Device[name].pending.pop(device, None)
+
+
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
   if 'action' not in model_output:
@@ -234,8 +243,6 @@ def main(demo=False):
   params.put_bool("ChestnutLoading", CHESTNUT)
   params.remove("ChestnutActive")
 
-  config_realtime_process(7, 54)
-
   # visionipc clients
   while True:
     available_streams = VisionIpcClient.available_streams("camerad", block=False)
@@ -276,6 +283,8 @@ def main(demo=False):
     loader.start()
     loader.join(BIG_MODEL_TIMEOUT)
     model = big_model
+    if model is None:
+      discard_chestnut_dependencies()
     params.put_bool("ChestnutActive", model is not None)
 
   small_model = ModelState(vipc_client_main.width, vipc_client_main.height, False) if model is None or CHESTNUT else None
@@ -283,6 +292,8 @@ def main(demo=False):
     model = small_model
   params.put_bool("ChestnutLoading", False)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
+  # A stuck USB loader must not inherit FIFO priority and starve the timeout above.
+  config_realtime_process(7, 54)
 
   # messaging
   pub_socks = ["modelV2", "drivingModelData", "cameraOdometry"] + (["chestnutGpuState"] if CHESTNUT else [])
