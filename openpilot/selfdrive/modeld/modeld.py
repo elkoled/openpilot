@@ -47,6 +47,15 @@ MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_TIMEOUT = 60
 
 
+def discard_chestnut_dependencies() -> None:
+  # Host buffers can retain waits on the failed GPU after modeld switches models.
+  opened = tuple(Device._opened_devices)
+  failed = [Device[name] for name in opened if name.split(':')[0] == 'AMD']
+  for name in opened:
+    for device in failed:
+      Device[name].pending.pop(device, None)
+
+
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float) -> log.ModelDataV2.Action:
   if 'action' not in model_output:
@@ -403,11 +412,12 @@ def main(demo=False):
                        run_count % round(ModelConstants.MODEL_RUN_FREQ / SERVICE_LIST['chestnutGpuState'].frequency) == 0)
       model_output = model.run(bufs, transforms, inputs, chestnut_state.send if send_chestnut else None)
     except Exception:
-      if not params.get_bool("ChestnutActive"):
+      if not model.chestnut:
         raise
       # fallback to small model
       cloudlog.exception("big model failed, fall back to small")
       params.put_bool("ChestnutActive", False)
+      discard_chestnut_dependencies()
       model = small_model
       if chestnut_state is not None:
         chestnut_state.big = False
