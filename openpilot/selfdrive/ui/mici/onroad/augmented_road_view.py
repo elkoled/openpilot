@@ -10,7 +10,7 @@ from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.mici.onroad.long_indicator import LongIndicator
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
-from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel, PANEL_WIDTH
+from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent, TextAlignment, TextAlignmentVertical
@@ -217,13 +217,18 @@ class AugmentedRoadView(CameraView):
     self._update_calibration()
 
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
-    show_navigation = ui_state.navigation_enabled and ui_state.nav_destination_set and alert_to_render is None
+
+    # navigating: only the map, full screen, with alerts on top
+    if ui_state.navigation_enabled and ui_state.nav_destination_set:
+      self._navigation.render(self.rect)
+      self._alert_renderer.render(self.rect)
+      return
 
     # Create inner content area with border padding
     self._content_rect = rl.Rectangle(
       self.rect.x,
       self.rect.y,
-      self.rect.width - (PANEL_WIDTH if show_navigation else SIDE_PANEL_WIDTH),
+      self.rect.width - SIDE_PANEL_WIDTH,
       self.rect.height,
     )
 
@@ -268,10 +273,7 @@ class AugmentedRoadView(CameraView):
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
-    if show_navigation:
-      self._navigation.render(rl.Rectangle(self._content_rect.x + self._content_rect.width, self.rect.y, PANEL_WIDTH, self.rect.height))
-    else:
-      self._confidence_ball.render(self.rect)
+    self._confidence_ball.render(self.rect)
 
     self._bookmark_icon.render(self.rect)
 
