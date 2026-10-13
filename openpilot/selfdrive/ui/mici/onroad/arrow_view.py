@@ -64,7 +64,11 @@ class ArrowView(Widget):
     super().__init__()
     dt = 1 / gui_app.target_fps
     self._bend = FirstOrderFilter(0.0, 0.4, dt)
-    self._shift = FirstOrderFilter(0.0, 0.6, dt)
+    self._shift = FirstOrderFilter(0.0, 0.5, dt)  # arrow tip, relative to the lanes
+    self._road = FirstOrderFilter(0.0, 0.5, dt)  # lanes, slide over once the car is in the new lane
+    self._reveal = FirstOrderFilter(0.0, 0.3, dt)  # target lane line during a lane change
+    self._direction = 0
+    self._changing = False
     self._lead = FirstOrderFilter(DISTANCE, 0.3, dt)
     self._lead_alpha = FirstOrderFilter(0.0, 0.2, dt)
     self._lane_alpha = [FirstOrderFilter(0.0, 0.5, dt) for _ in range(4)]
@@ -77,9 +81,26 @@ class ArrowView(Widget):
     bend = model.action.desiredCurvature * DISTANCE ** 2 / 2
     self._bend.update(MAX_BEND * np.tanh(bend / MAX_BEND))
 
+    # lane change: the arrow leans, then curves into the target lane, then the lanes slide under it
     meta = model.meta
-    direction = {LaneChangeDirection.left: -1, LaneChangeDirection.right: 1}.get(meta.laneChangeDirection, 0)
-    self._shift.update(direction * LANE if meta.laneChangeState == LaneChangeState.laneChangeStarting else 0.0)
+    direction = {LaneChangeDirection.left: -1, LaneChangeDirection.right: 1}.get(meta.laneChangeDirection.raw, 0)
+    if direction:
+      self._direction = direction
+    state = meta.laneChangeState
+    changing = state == LaneChangeState.laneChangeStarting
+    if self._changing and not changing:
+      # the target lane becomes the current one, same picture, new reference
+      self._road.x += self._direction * LANE
+    self._changing = changing
+    if changing:
+      shift = self._direction * LANE
+    elif state == LaneChangeState.preLaneChange and direction:
+      shift = direction * LANE * 0.2
+    else:
+      shift = 0.0
+    self._shift.update(shift)
+    self._road.update(0.0)
+    self._reveal.update(1.0 if state in (LaneChangeState.preLaneChange, LaneChangeState.laneChangeStarting) and direction else 0.0)
 
     lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
@@ -96,7 +117,7 @@ class ArrowView(Widget):
 
     probs = list(model.laneLineProbs) + [0.0] * 4
     for i, f in enumerate(self._lane_alpha):
-      f.update(float(np.clip(probs[i], 0, 1)) * (1.0 if i in (1, 2) else 0.4))
+      f.update(max(float(np.clip(probs[i], 0, 1)), 0.5) * (1.0 if i in (1, 2) else 0.4))
 
   def _render(self, rect: rl.Rectangle):
     rl.draw_rectangle_rec(rect, rl.BLACK)
@@ -118,10 +139,14 @@ class ArrowView(Widget):
     lane_top = DISTANCE + TOP_MARGIN / long_scale
     ls = np.linspace(0.0, lane_top, 60)
     lane_curve = self._bend.x * (ls / DISTANCE) ** 2
-    for i, offset in enumerate((-1.5, -0.5, 0.5, 1.5)):
-      alpha = int(255 * self._lane_alpha[i].x)
+    lane_alpha = {-2.5: self._lane_alpha[0].x * 0.5, -1.5: self._lane_alpha[0].x, -0.5: self._lane_alpha[1].x,
+                  0.5: self._lane_alpha[2].x, 1.5: self._lane_alpha[3].x, 2.5: self._lane_alpha[3].x * 0.5}
+    if self._direction:
+      lane_alpha[1.5 * self._direction] = max(lane_alpha[1.5 * self._direction], self._reveal.x)
+    for offset, a in lane_alpha.items():
+      alpha = int(255 * min(a, 1.0))
       if alpha > 2:
-        _strip(*to_screen(ls, lane_curve + offset * LANE), LANE_WIDTH, rl.Color(GREY.r, GREY.g, GREY.b, alpha))
+        _strip(*to_screen(ls, lane_curve + offset * LANE + self._road.x), LANE_WIDTH, rl.Color(GREY.r, GREY.g, GREY.b, alpha))
 
     if ui_state.status == UIStatus.ENGAGED:
       path_color, edge_color = WHITE, GREEN
@@ -136,7 +161,8 @@ class ArrowView(Widget):
     head = HEAD_LENGTH / long_scale * (1 - lead_t)
     keep = s <= max(end - head, 4.0)
     x = s[keep]
-    shift = self._shift.x * (3 * u[keep] ** 2 - 2 * u[keep] ** 3)
+    v = x / max(x[-1], 1.0)  # ease over the drawn length so the tip always reaches the target lane
+    shift = self._shift.x * (3 * v ** 2 - 2 * v ** 3)
     px, py = to_screen(x, curve[keep] + shift)
 
     if edge_color is not None:

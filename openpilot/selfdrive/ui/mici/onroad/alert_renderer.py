@@ -90,6 +90,7 @@ ALERT_CRITICAL_REBOOT = Alert(
 class AlertRenderer(Widget):
   def __init__(self):
     super().__init__()
+    self.hidden_events: set[str] = set()
 
     self._alert_text1_label = UnifiedLabel(text="", font_size=ALERT_FONT_BIG, font_weight=FontWeight.DISPLAY, line_height=0.86,
                                            letter_spacing=-0.02)
@@ -140,7 +141,7 @@ class AlertRenderer(Widget):
           return ALERT_CRITICAL_REBOOT
 
     # No alert if size is none
-    if ss.alertSize == 0:
+    if ss.alertSize == 0 or ss.alertType.split('/')[0] in self.hidden_events:
       return None
 
     # Return current alert

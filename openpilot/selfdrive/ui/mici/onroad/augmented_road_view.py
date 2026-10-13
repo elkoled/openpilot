@@ -218,10 +218,13 @@ class AugmentedRoadView(CameraView):
     # Update calibration before rendering
     self._update_calibration()
 
+    # the arrow view shows lane changes itself
+    navigating = ui_state.navigation_enabled and ui_state.nav_destination_set
+    self._alert_renderer.hidden_events = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if navigating else set()
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
     # navigating: the arrow in the left third, the map in the rest, with alerts on top
-    if ui_state.navigation_enabled and ui_state.nav_destination_set:
+    if navigating:
       arrow_width = round(self.rect.width / 3)
       self._arrow_view.render(rl.Rectangle(self.rect.x, self.rect.y, arrow_width, self.rect.height))
       self._navigation.render(rl.Rectangle(self.rect.x + arrow_width, self.rect.y, self.rect.width - arrow_width, self.rect.height))
