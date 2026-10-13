@@ -87,6 +87,8 @@ class ArrowView(Widget):
     self._lines: list[_Line] = []
     self._plan: np.ndarray | None = None
     self._effort = 0.0
+    self._curvature = 0.0
+    self._in_lane = 1.0
     self._lead = DISTANCE
     self._lead_alpha = 0.0
 
@@ -131,6 +133,9 @@ class ArrowView(Widget):
     else:
       effort = abs(model.action.desiredCurvature) * sm['carState'].vEgo ** 2 / MAX_LAT_ACCEL
     self._effort = self._smooth(self._effort, min(effort, 1.0))
+    self._curvature = self._smooth(self._curvature, model.action.desiredCurvature)
+    # the plan cuts corners and drifts at range, keep it in the lane except while changing lanes
+    self._in_lane = self._smooth(self._in_lane, 1.0 if model.meta.laneChangeState == 'off' else 0.0)
 
     lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
@@ -161,12 +166,13 @@ class ArrowView(Widget):
     # lanes: the two lines around the car in the status color, the rest grey
     left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
     right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
-    # near the steering limit the line the car is closest to lights up
-    near = min((line for line in (left, right) if line is not None), key=lambda line: abs(line.y[0]), default=None)
+    # near the steering limit the outside line of the curve lights up, the car drifts out there on low torque
+    # model frame, positive curvature turns right
+    outside = left if self._curvature > 0 else right
     for line in self._lines:
       inner = line is left or line is right
       color = GREEN if inner and engaged else GREY
-      if line is near and engaged:
+      if line is outside and engaged:
         color = _effort_color(color, self._effort)
       color = rl.Color(color.r, color.g, color.b, int(255 * line.alpha))
       if color.a > 2:
@@ -179,7 +185,15 @@ class ArrowView(Widget):
       end = DISTANCE + (self._lead - DISTANCE) * lead_t
       head = HEAD_LENGTH / long_scale * (1 - lead_t)
       x = np.linspace(0.0, max(end - head, 4.0), 40)
-      px, py = to_screen(x, np.interp(x, self._xs, self._plan))
+      y = np.interp(x, self._xs, self._plan)
+      if left is not None and right is not None:
+        # room for the path, or the arrowhead and lead bar at the tip, plus the line width and a gap
+        tip = max(HEAD_WIDTH, LEAD_BAR_WIDTH) / 2
+        half = np.interp(x, [0.0, x[-1] * 0.4, x[-1]], [PATH_WIDTH / 2, PATH_WIDTH / 2, tip]) + LANE_WIDTH + 2
+        lo, hi = np.interp(x, self._xs, left.y) + half / LATERAL_SCALE, np.interp(x, self._xs, right.y) - half / LATERAL_SCALE
+        center = (lo + hi) / 2
+        y += (np.clip(y, np.minimum(lo, center), np.maximum(hi, center)) - y) * self._in_lane
+      px, py = to_screen(x, y)
       _strip(px, py, PATH_WIDTH, path_color)
 
       tip = rl.Vector2(float(px[-1]), float(py[-1]))
