@@ -16,6 +16,10 @@ SMOOTH_RC = 0.25  # seconds
 MATCH_DISTANCE = 1.5  # meters a lane line can move between frames and still be the same line
 OUTER_LINE_PROB = 0.3  # the outer lines only show when the model sees a lane there
 LANE_CHANGE_LENGTH = 0.5  # part of the arrow the lane change crosses over in
+COAST_ACCEL = 0.25  # m/s^2 below which the path stays solid
+FULL_ACCEL = 1.5  # m/s^2 where the path is fully broken up
+PULSE_PERIOD = 44  # px from one bright band to the next
+PULSE_SPEED = 70  # px/s the bands flow at full accel, slower with less
 
 PATH_WIDTH = 10
 LANE_WIDTH = 3
@@ -82,6 +86,8 @@ class ArrowView(Widget):
     self._target = 0.0  # lateral offset of the lane change's target lane center
     self._lead = DISTANCE
     self._lead_alpha = 0.0
+    self._accel = 0.0
+    self._phase = 0.0
 
   def _smooth(self, old, new):
     return old + (new - old) * self._k
@@ -128,6 +134,11 @@ class ArrowView(Widget):
     self._lane_change = self._smooth(self._lane_change, 0.0 if model.meta.laneChangeState == 'off' else 1.0)
     self._update_lane_change(model.meta)
 
+    # the bands flow toward the car accelerating, away from it braking, faster the harder
+    self._accel = self._smooth(self._accel, sm['carState'].aEgo)
+    flow = PULSE_SPEED * self._broken()
+    self._phase += np.sign(self._accel) * flow / gui_app.target_fps
+
     lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
       lead = sm['radarState'].leadOne.dRel
@@ -138,6 +149,28 @@ class ArrowView(Widget):
       self._lead_alpha = self._smooth(self._lead_alpha, 1.0)
     else:
       self._lead_alpha = self._smooth(self._lead_alpha, 0.0)
+
+  def _broken(self) -> float:
+    return float(np.clip((abs(self._accel) - COAST_ACCEL) / (FULL_ACCEL - COAST_ACCEL), 0.0, 1.0))
+
+  def _draw_path(self, px: np.ndarray, py: np.ndarray, color: rl.Color):
+    # solid coasting, accelerating or braking the path dims and bright bands flow along it
+    t = self._broken()
+    _strip(px, py, PATH_WIDTH, _blend(color, rl.Color(color.r, color.g, color.b, 90), t))
+    band = rl.Color(color.r, color.g, color.b, int(255 * t))
+    if band.a < 3:
+      return
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(px), np.diff(py)))])
+    radius = PATH_WIDTH / 2
+    for start in np.arange(-(self._phase % PULSE_PERIOD), s[-1], PULSE_PERIOD):
+      # round capped bands, the caps count toward their length
+      a, b = max(start + radius, 0.0), min(start + PULSE_PERIOD / 2 - radius, s[-1])
+      if b - a > 1.0:
+        ss = np.linspace(a, b, max(int((b - a) / 4), 2))
+        qx, qy = np.interp(ss, s, px), np.interp(ss, s, py)
+        _strip(qx, qy, PATH_WIDTH, band)
+        rl.draw_circle_v(rl.Vector2(float(qx[0]), float(qy[0])), radius, band)
+        rl.draw_circle_v(rl.Vector2(float(qx[-1]), float(qy[-1])), radius, band)
 
   @staticmethod
   def _road_there(model, i: int) -> bool:
@@ -230,7 +263,7 @@ class ArrowView(Widget):
       lead_t = self._lead_alpha
       end = dist + (min(self._lead, dist) - dist) * lead_t
       px, py = plan_points(max(end, 4.0))
-      _strip(px, py, PATH_WIDTH, path_color)
+      self._draw_path(px, py, path_color)
 
       tip = rl.Vector2(float(px[-1]), float(py[-1]))
       dx, dy = px[-1] - px[-2], py[-1] - py[-2]
