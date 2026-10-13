@@ -9,8 +9,8 @@ from openpilot.system.ui.widgets import Widget
 # a top down view of the model's lane lines and plan, smoothed over time
 DISTANCE = 50.0  # meters the arrow spans
 LATERAL_SCALE = 14.0  # px per meter, lateral is stretched and distance squished to fit the panel
-BOTTOM_MARGIN = 36
-TOP_MARGIN = 40
+BOTTOM_MARGIN = 22
+TOP_MARGIN = 28
 SMOOTH_RC = 0.25  # seconds
 MATCH_DISTANCE = 1.5  # meters a lane line can move between frames and still be the same line
 
@@ -27,6 +27,7 @@ LIGHT_GREY = rl.Color(200, 200, 200, 255)
 DIM = rl.Color(60, 60, 60, 255)
 ORANGE = rl.Color(255, 120, 30, 255)
 RED = rl.Color(235, 45, 35, 255)
+MAX_HEADING = 45.0  # degrees on screen the arrow bends to at most
 MAX_LAT_ACCEL = 3.0  # m/s^2, ISO limit openpilot steers to
 HIGH_EFFORT = 0.65
 
@@ -72,6 +73,7 @@ class ArrowView(Widget):
     self._plan: np.ndarray | None = None
     self._effort = 0.0
     self._curvature = 0.0
+    self._lane_change = 0.0
     self._lead = DISTANCE
     self._lead_alpha = 0.0
 
@@ -115,6 +117,7 @@ class ArrowView(Widget):
       effort = abs(model.action.desiredCurvature) * sm['carState'].vEgo ** 2 / MAX_LAT_ACCEL
     self._effort = self._smooth(self._effort, min(effort, 1.0))
     self._curvature = self._smooth(self._curvature, model.action.desiredCurvature)
+    self._lane_change = self._smooth(self._lane_change, 0.0 if model.meta.laneChangeState == 'off' else 1.0)
 
     lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
@@ -134,18 +137,47 @@ class ArrowView(Widget):
       return
 
     origin_x, origin_y = rect.x + rect.width / 2, rect.y + rect.height - BOTTOM_MARGIN
-    long_scale = (rect.height - BOTTOM_MARGIN - TOP_MARGIN) / DISTANCE
+    span = rect.height - BOTTOM_MARGIN - TOP_MARGIN
+    xs, plan = self._xs, self._plan
+    left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
+    right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
+    dist, long_scale = DISTANCE, span / DISTANCE
 
     def to_screen(x, y):
       return origin_x + np.asarray(y) * LATERAL_SCALE, origin_y - np.asarray(x) * long_scale
+
+    # the heading cap in meters that looks like MAX_HEADING on screen, lateral is stretched
+    cap = np.arctan(np.tan(np.radians(MAX_HEADING)) * long_scale / LATERAL_SCALE)
+
+    def arc(y0, length):
+      # an arc of the steering curvature, straight at the car and bending toward the top, offset sideways by y0
+      ss = np.linspace(0.0, length, 40)
+      theta = cap * np.tanh(self._curvature * dist / cap) * (ss / dist) ** 2
+      ds = np.diff(ss, prepend=0.0)
+      ax, ay = np.cumsum(np.cos(theta) * ds), np.cumsum(np.sin(theta) * ds)
+      return ax - y0 * np.sin(theta), ay + y0 * np.cos(theta)
+
+    def line_points(y_line):
+      return to_screen(*arc(y_line[0], dist))
+
+    def plan_points(end):
+      ax, ay = arc(plan[0], end)
+      if left is not None and right is not None:
+        # lane change: shift the arrow by how far the plan leaves the lane center, about a lane at most
+        center = (left.y + right.y) / 2
+        width = max(float(right.y[0] - left.y[0]), 2.5)
+        # the target is where the plan is headed, eased in along the arrow so a short arrow at a lead car still crosses over
+        far = float(np.interp(DISTANCE * 0.8, xs, plan - center) - (plan[0] - center[0]))
+        target = np.clip(far * 4, -width, width)  # a full lane as soon as the plan commits
+        u = np.clip(ax / max(float(ax[-1]), 1.0), 0.0, 1.0)
+        ay = ay + target * (3 * u ** 2 - 2 * u ** 3) * self._lane_change
+      return to_screen(ax, ay)
 
     engaged = ui_state.status == UIStatus.ENGAGED
     override = ui_state.status == UIStatus.OVERRIDE
     rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
 
     # lanes: the two lines around the car green engaged and white on override, the rest grey, all dim when off
-    left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
-    right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
     # near the steering limit the outside line of the curve lights up, the car drifts out there on low torque
     # model frame, positive curvature turns right
     outside = left if self._curvature > 0 else right
@@ -159,15 +191,14 @@ class ArrowView(Widget):
         color = _effort_color(color, self._effort)
       color = rl.Color(color.r, color.g, color.b, int(255 * line.alpha))
       if color.a > 2:
-        _strip(*to_screen(self._xs, line.y), LANE_WIDTH if inner else OUTER_LANE_WIDTH, color)
+        _strip(*line_points(line.y), LANE_WIDTH if inner else OUTER_LANE_WIDTH, color)
 
     # the planned path, ending in an arrowhead that flattens into a bar at the lead car, light grey on override, hidden when off
     if engaged or override:
       path_color = WHITE if engaged else LIGHT_GREY
       lead_t = self._lead_alpha
-      end = DISTANCE + (self._lead - DISTANCE) * lead_t
-      x = np.linspace(0.0, max(end, 4.0), 40)
-      px, py = to_screen(x, np.interp(x, self._xs, self._plan))
+      end = dist + (min(self._lead, dist) - dist) * lead_t
+      px, py = plan_points(max(end, 4.0))
       _strip(px, py, PATH_WIDTH, path_color)
 
       tip = rl.Vector2(float(px[-1]), float(py[-1]))
