@@ -9,22 +9,22 @@ from openpilot.system.ui.widgets import Widget
 # a top down view of the model's lane lines and plan, smoothed over time
 DISTANCE = 50.0  # meters the arrow spans
 LATERAL_SCALE = 14.0  # px per meter, lateral is stretched and distance squished to fit the panel
-BOTTOM_MARGIN = 0
-TOP_MARGIN = 30
+BOTTOM_MARGIN = 36
+TOP_MARGIN = 40
 SMOOTH_RC = 0.25  # seconds
 MATCH_DISTANCE = 1.5  # meters a lane line can move between frames and still be the same line
 
 PATH_WIDTH = 10
 LANE_WIDTH = 3
 OUTER_LANE_WIDTH = 2
-HEAD_LENGTH = 16
-HEAD_WIDTH = 26
-LEAD_BAR_WIDTH = 28
-LEAD_BAR_HEIGHT = 7
+HEAD_LENGTH = 15  # length of each arrowhead arm
+LEAD_BAR_WIDTH = 30
 
 WHITE = rl.Color(255, 255, 255, 255)
 GREEN = rl.Color(70, 230, 90, 255)
 GREY = rl.Color(110, 110, 110, 255)
+LIGHT_GREY = rl.Color(200, 200, 200, 255)
+DIM = rl.Color(60, 60, 60, 255)
 ORANGE = rl.Color(255, 120, 30, 255)
 RED = rl.Color(235, 45, 35, 255)
 MAX_LAT_ACCEL = 3.0  # m/s^2, ISO limit openpilot steers to
@@ -53,26 +53,10 @@ def _strip(px: np.ndarray, py: np.ndarray, width: float, color: rl.Color):
   draw_polygon(rl.Rectangle(lo[0], lo[1], hi[0] - lo[0] + 1, hi[1] - lo[1] + 1), points, color)
 
 
-def _triangle(a: rl.Vector2, b: rl.Vector2, c: rl.Vector2, color: rl.Color):
-  # raylib culls by winding, draw both
-  rl.draw_triangle(a, b, c, color)
-  rl.draw_triangle(a, c, b, color)
-
-
-def _quad(center: rl.Vector2, dx: float, dy: float, half_width: float, half_height: float, color: rl.Color):
-  hx, hy = -dy * half_width, dx * half_width
-  tx, ty = dx * half_height, dy * half_height
-  a, b = rl.Vector2(center.x - hx - tx, center.y - hy - ty), rl.Vector2(center.x + hx - tx, center.y + hy - ty)
-  c, d = rl.Vector2(center.x + hx + tx, center.y + hy + ty), rl.Vector2(center.x - hx + tx, center.y - hy + ty)
-  _triangle(a, b, c, color)
-  _triangle(a, c, d, color)
-
-
 class _Line:
   def __init__(self, y: np.ndarray):
     self.y = y
     self.alpha = 0.4
-    self.prob = 0.0
     self.seen = True
 
 
@@ -83,12 +67,11 @@ class ArrowView(Widget):
   def __init__(self):
     super().__init__()
     self._k = (1 / gui_app.target_fps) / (SMOOTH_RC + 1 / gui_app.target_fps)
-    self._xs = np.linspace(0.0, DISTANCE * 1.3, 40)
+    self._xs = np.linspace(0.0, DISTANCE, 40)
     self._lines: list[_Line] = []
     self._plan: np.ndarray | None = None
     self._effort = 0.0
     self._curvature = 0.0
-    self._in_lane = 1.0
     self._lead = DISTANCE
     self._lead_alpha = 0.0
 
@@ -107,8 +90,7 @@ class ArrowView(Widget):
     # match this frame's lines to the tracked ones by where they are next to the car
     for line in self._lines:
       line.seen = False
-    probs = list(model.laneLineProbs)
-    for i, lane_line in enumerate(model.laneLines):
+    for lane_line in model.laneLines:
       if len(lane_line.x) < 2:
         continue
       y = np.interp(self._xs, lane_line.x, lane_line.y)
@@ -120,10 +102,9 @@ class ArrowView(Widget):
         match = _Line(y)
         self._lines.append(match)
       match.seen = True
-      match.prob = self._smooth(match.prob, probs[i] if i < len(probs) else 0.0)
     for line in self._lines:
-      # confidence drops while changing lanes, keep the lines visible through it
-      line.alpha = self._smooth(line.alpha, float(np.clip(line.prob * 2, 0.4, 1.0)) if line.seen else 0.0)
+      # solid while seen, fades in and out as lines appear and drop
+      line.alpha = self._smooth(line.alpha, 1.0 if line.seen else 0.0)
     self._lines = [line for line in self._lines if line.seen or line.alpha > 0.02]
 
     # how much of the steering limit is used, torque output when the car has one
@@ -134,8 +115,6 @@ class ArrowView(Widget):
       effort = abs(model.action.desiredCurvature) * sm['carState'].vEgo ** 2 / MAX_LAT_ACCEL
     self._effort = self._smooth(self._effort, min(effort, 1.0))
     self._curvature = self._smooth(self._curvature, model.action.desiredCurvature)
-    # the plan cuts corners and drifts at range, keep it in the lane except while changing lanes
-    self._in_lane = self._smooth(self._in_lane, 1.0 if model.meta.laneChangeState == 'off' else 0.0)
 
     lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
@@ -161,9 +140,10 @@ class ArrowView(Widget):
       return origin_x + np.asarray(y) * LATERAL_SCALE, origin_y - np.asarray(x) * long_scale
 
     engaged = ui_state.status == UIStatus.ENGAGED
+    override = ui_state.status == UIStatus.OVERRIDE
     rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
 
-    # lanes: the two lines around the car in the status color, the rest grey
+    # lanes: the two lines around the car green engaged and white on override, the rest grey, all dim when off
     left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
     right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
     # near the steering limit the outside line of the curve lights up, the car drifts out there on low torque
@@ -171,42 +151,38 @@ class ArrowView(Widget):
     outside = left if self._curvature > 0 else right
     for line in self._lines:
       inner = line is left or line is right
-      color = GREEN if inner and engaged else GREY
+      if engaged or override:
+        color = (GREEN if engaged else WHITE) if inner else GREY
+      else:
+        color = DIM
       if line is outside and engaged:
         color = _effort_color(color, self._effort)
       color = rl.Color(color.r, color.g, color.b, int(255 * line.alpha))
       if color.a > 2:
         _strip(*to_screen(self._xs, line.y), LANE_WIDTH if inner else OUTER_LANE_WIDTH, color)
 
-    # the planned path, ending in an arrowhead or a bar at the lead car, grey on override, hidden when disengaged
-    if ui_state.status != UIStatus.DISENGAGED:
-      path_color = WHITE if engaged else GREY
+    # the planned path, ending in an arrowhead that flattens into a bar at the lead car, light grey on override, hidden when off
+    if engaged or override:
+      path_color = WHITE if engaged else LIGHT_GREY
       lead_t = self._lead_alpha
       end = DISTANCE + (self._lead - DISTANCE) * lead_t
-      head = HEAD_LENGTH / long_scale * (1 - lead_t)
-      x = np.linspace(0.0, max(end - head, 4.0), 40)
-      y = np.interp(x, self._xs, self._plan)
-      if left is not None and right is not None:
-        # room for the path, or the arrowhead and lead bar at the tip, plus the line width and a gap
-        tip = max(HEAD_WIDTH, LEAD_BAR_WIDTH) / 2
-        half = np.interp(x, [0.0, x[-1] * 0.4, x[-1]], [PATH_WIDTH / 2, PATH_WIDTH / 2, tip]) + LANE_WIDTH + 2
-        lo, hi = np.interp(x, self._xs, left.y) + half / LATERAL_SCALE, np.interp(x, self._xs, right.y) - half / LATERAL_SCALE
-        center = (lo + hi) / 2
-        y += (np.clip(y, np.minimum(lo, center), np.maximum(hi, center)) - y) * self._in_lane
-      px, py = to_screen(x, y)
+      x = np.linspace(0.0, max(end, 4.0), 40)
+      px, py = to_screen(x, np.interp(x, self._xs, self._plan))
       _strip(px, py, PATH_WIDTH, path_color)
 
       tip = rl.Vector2(float(px[-1]), float(py[-1]))
       dx, dy = px[-1] - px[-2], py[-1] - py[-2]
       norm = max(float(np.hypot(dx, dy)), 1e-6)
       dx, dy = dx / norm, dy / norm
-      length = HEAD_LENGTH * (1 - lead_t)
-      half_width = HEAD_WIDTH / 2 + (LEAD_BAR_WIDTH - HEAD_WIDTH) / 2 * lead_t
-      if lead_t > 0.02:
-        _quad(tip, dx, dy, half_width, LEAD_BAR_HEIGHT / 2 * lead_t, path_color)
-      if length > 1:
-        point = rl.Vector2(tip.x + dx * length, tip.y + dy * length)
-        hx, hy = -dy * half_width, dx * half_width
-        _triangle(point, rl.Vector2(tip.x - hx, tip.y - hy), rl.Vector2(tip.x + hx, tip.y + hy), path_color)
+      # arms swept back 45 degrees, opening to 90 into the lead bar
+      angle = np.radians(45 + 45 * lead_t)
+      length = HEAD_LENGTH + (LEAD_BAR_WIDTH / 2 - HEAD_LENGTH) * lead_t
+      for side in (-1, 1):
+        c, s = np.cos(angle), np.sin(angle) * side
+        ax, ay = -(dx * c - dy * s), -(dx * s + dy * c)
+        end_point = rl.Vector2(tip.x + ax * length, tip.y + ay * length)
+        rl.draw_line_ex(tip, end_point, PATH_WIDTH, path_color)
+        rl.draw_circle_v(end_point, PATH_WIDTH / 2, path_color)
+      rl.draw_circle_v(tip, PATH_WIDTH / 2, path_color)
 
     rl.end_scissor_mode()
