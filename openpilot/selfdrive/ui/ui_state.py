@@ -90,7 +90,9 @@ class UIState:
     self.is_release = self.params.get_bool("IsReleaseBranch")
     self.always_on_dm: bool = self.params.get_bool("AlwaysOnDM")
     self.navigation_enabled: bool = self.params.get_bool("NavigationEnabled")
-    self.nav_destination_set: bool = self.params.get("NavDestination") is not None
+    self.nav_destination: dict | None = self.params.get("NavDestination")
+    self.nav_home: dict | None = self.params.get("NavHome")
+    self.nav_work: dict | None = self.params.get("NavWork")
     self.chestnut_present: bool = False
     self.chestnut_compiled: bool = chestnut_compiled()
     self.chestnut_active: bool | None = None
@@ -130,6 +132,10 @@ class UIState:
   @property
   def engaged(self) -> bool:
     return self.started and self.sm["selfdriveState"].enabled
+
+  @property
+  def nav_destination_set(self) -> bool:
+    return self.nav_destination is not None
 
   def is_onroad(self) -> bool:
     return self.started
@@ -253,7 +259,9 @@ class UIState:
     self.initial_cruise_speed = self.params.get("InitialCruiseSpeedKph", return_default=True)
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.navigation_enabled = self.params.get_bool("NavigationEnabled")
-    self.nav_destination_set = self.params.get("NavDestination") is not None
+    self.nav_destination = self.params.get("NavDestination")
+    self.nav_home = self.params.get("NavHome")
+    self.nav_work = self.params.get("NavWork")
     self.chestnut_active = self.params.get("ChestnutActive")
     self.chestnut_loading = self.params.get_bool("ChestnutLoading")
     self.chestnut_alert = any(self.params.get(k) is not None for k, a in OFFROAD_ALERTS.items() if k.startswith("Offroad_Chestnut") and a["severity"] >= 0)

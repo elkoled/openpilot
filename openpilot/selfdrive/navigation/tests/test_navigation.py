@@ -1,4 +1,5 @@
 import gzip
+import json
 import re
 import struct
 import tempfile
@@ -16,6 +17,7 @@ import requests
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.prefix import OpenpilotPrefix
+from openpilot.selfdrive.navigation.geocode import add_route_summary, parse_place, search
 from openpilot.selfdrive.navigation.mapsd import MapsD
 from openpilot.selfdrive.navigation.navd import REROUTE_COUNTER_MIN, RETRY_HOLD, ROUTE_RESEND_PERIOD, RouteEngine, set_banner
 from openpilot.selfdrive.navigation.pmtiles import PMTiles, decode_directory, tile_id
@@ -93,6 +95,7 @@ def route_engine(sm, pm, values):
   params = MagicMock()
   params.get.side_effect = values.get
   params.remove.side_effect = lambda key: values.pop(key, None)
+  params.put.side_effect = values.__setitem__
   with patch('openpilot.selfdrive.navigation.navd.Api') as api:
     api.return_value.get_token.return_value = 'test-token'
     return RouteEngine(sm, pm, params=params)
@@ -334,7 +337,7 @@ class TestRouteEngine(unittest.TestCase):
     self.engine.last_position = (0.0024, 0)  # driving away from the destination
     self.engine.send_instruction()
     self.assertIsNone(self.engine.route)
-    self.assertIn('NavDestination', self.values)  # kept, the next recompute routes back to it
+    self.assertNotIn('NavDestination', self.values)
 
   def test_failed_request_keeps_route_and_retries(self):
     self.load_route()
@@ -360,6 +363,56 @@ class TestRouteEngine(unittest.TestCase):
       self.sm.recv_time = dict.fromkeys(self.sm.valid, time.monotonic() - 3)  # or stale
       self.engine.update()
       self.assertEqual(self.engine.last_position, (2, 2))
+
+  def test_saves_last_position(self):
+    self.sm.__getitem__.return_value = SimpleNamespace(hasFix=True, latitude=32.75, longitude=-117.19, bearingDeg=0)
+    with patch('requests.get', return_value=self.response):
+      self.sm.frame = 1
+      self.engine.update()
+      self.assertNotIn('LastGPSPosition', self.values)
+      self.sm.frame = 60
+      self.engine.update()
+    self.assertEqual(json.loads(self.values['LastGPSPosition']), {'latitude': 32.75, 'longitude': -117.19})
+
+
+class TestGeocode(unittest.TestCase):
+  ADDRESS = {'place_id': 1, 'lat': '32.7521170', 'lon': '-117.1955910', 'name': '', 'display_name': '3900, Harney Street, Old Town, San Diego',
+             'address': {'house_number': '3900', 'road': 'Harney Street', 'suburb': 'Old Town', 'city': 'San Diego'}}
+  PARK = {'place_id': 2, 'lat': '32.73', 'lon': '-117.14', 'name': 'Balboa Park', 'display_name': 'Balboa Park, San Diego',
+          'address': {'park': 'Balboa Park', 'city': 'San Diego'}}
+
+  def test_parse_place(self):
+    place = parse_place(self.ADDRESS)
+    self.assertEqual((place.name, place.details), ('3900 Harney Street', 'Old Town, San Diego'))
+    self.assertEqual(place.to_param(), {'latitude': 32.752117, 'longitude': -117.195591,
+                                        'place_name': '3900 Harney Street', 'place_details': 'Old Town, San Diego'})
+    place = parse_place(self.PARK)
+    self.assertEqual((place.name, place.details), ('Balboa Park', 'San Diego'))
+
+  def test_search_near_first(self):
+    def get(url, params, **kwargs):
+      return MagicMock(json=MagicMock(return_value=[] if params.get('bounded') else [self.PARK]))
+    with patch('requests.get', side_effect=get) as mock_get:
+      self.assertEqual([p.name for p in search('balboa park', near=(32.75, -117.19))], ['Balboa Park'])
+      self.assertEqual(mock_get.call_count, 2)  # nothing nearby, so it searches everywhere
+      self.assertEqual(mock_get.call_args_list[0].kwargs['params']['viewbox'], '-117.69,33.25,-116.69,32.25')
+      mock_get.reset_mock()
+      self.assertEqual(len(search('balboa park')), 1)
+      self.assertEqual(mock_get.call_count, 1)
+      self.assertNotIn('viewbox', mock_get.call_args.kwargs['params'])
+
+  def test_route_summary_falls_back(self):
+    place = parse_place(self.ADDRESS)
+    osrm = MagicMock(json=MagicMock(return_value={'routes': [{'distance': 5629.2, 'duration': 342.9}]}))
+    with patch('openpilot.selfdrive.navigation.geocode._directions', side_effect=RuntimeError("no key")), \
+         patch('requests.get', return_value=osrm) as mock_get:
+      add_route_summary(place, (32.7157, -117.1611))
+    self.assertEqual((place.distance, place.duration), (5629.2, 342.9))
+    self.assertTrue(mock_get.call_args.args[0].endswith('-117.1611,32.7157;-117.195591,32.752117'))
+    with patch('requests.get', side_effect=requests.exceptions.ConnectionError):
+      place = parse_place(self.ADDRESS)
+      add_route_summary(place, (32.7157, -117.1611))
+    self.assertIsNone(place.distance)
 
 
 class TestTiles(unittest.TestCase):

@@ -12,6 +12,7 @@ from openpilot.selfdrive.ui.mici.onroad.long_indicator import LongIndicator
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.arrow_view import ArrowView
 from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel
+from openpilot.selfdrive.ui.mici.layouts.nav_destination import DestinationPicker
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent, TextAlignment, TextAlignmentVertical
@@ -173,6 +174,9 @@ class AugmentedRoadView(CameraView):
     self._bookmark_icon = BookmarkIcon(bookmark_callback)
 
     self._navigation = NavigationPanel()
+    self._destination_picker = DestinationPicker()
+    self._destination_picker.set_touch_valid_callback(self._touch_valid)
+    self._picker_shown = False
     self._arrow_view = ArrowView()
     self._model_renderer = ModelRenderer()
     self._hud_renderer = HudRenderer()
@@ -203,7 +207,9 @@ class AugmentedRoadView(CameraView):
       self._offroad_label.set_text("start the car to\nuse openpilot")
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
-    # Don't trigger click callback if bookmark was triggered
+    # Don't trigger click callback if bookmark was triggered or a destination was picked
+    if self._picker_shown and rl.check_collision_point_rec(mouse_pos, self._destination_picker.rect):
+      return
     if not self._bookmark_icon.interacting():
       super()._handle_mouse_release(mouse_pos)
 
@@ -220,12 +226,14 @@ class AugmentedRoadView(CameraView):
     self._update_calibration()
 
     # the arrow view shows lane changes itself
-    navigating = ui_state.navigation_enabled and ui_state.nav_destination_set
-    self._alert_renderer.hidden_events = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if navigating else set()
+    nav_view = ui_state.navigation_enabled
+    self._alert_renderer.hidden_events = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if nav_view else set()
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
+    self._picker_shown = nav_view and not ui_state.nav_destination_set
 
-    # navigating: the status icons on the left, then the arrow, the map in the right two thirds, with alerts on top
-    if navigating:
+    # navigation: the status icons on the left, then the arrow, the map in the right two thirds, with alerts on top
+    # without a destination the map's place has home, work and search
+    if nav_view:
       map_x = self.rect.x + round(self.rect.width / 3)
       icons = rl.Rectangle(self.rect.x, self.rect.y, NAV_ICONS_WIDTH, self.rect.height)
       rl.draw_rectangle_rec(icons, rl.BLACK)
@@ -238,8 +246,13 @@ class AugmentedRoadView(CameraView):
                                                  alert_to_render.visual_alert == car.CarControl.HUDControl.VisualAlert.steerRequired)
       self._hud_renderer.draw_steering_wheel(icons)
 
-      self._arrow_view.render(rl.Rectangle(icons.x + icons.width, self.rect.y, map_x - icons.x - icons.width, self.rect.height))
-      self._navigation.render(rl.Rectangle(map_x, self.rect.y, self.rect.x + self.rect.width - map_x, self.rect.height))
+      if self._picker_shown:
+        picker = rl.Rectangle(icons.x + icons.width, self.rect.y, self.rect.x + self.rect.width - icons.x - icons.width, self.rect.height)
+        rl.draw_rectangle_rec(picker, rl.BLACK)
+        self._destination_picker.render(picker)
+      else:
+        self._arrow_view.render(rl.Rectangle(icons.x + icons.width, self.rect.y, map_x - icons.x - icons.width, self.rect.height))
+        self._navigation.render(rl.Rectangle(map_x, self.rect.y, self.rect.x + self.rect.width - map_x, self.rect.height))
       self._alert_renderer.render(self.rect)
       return
 
