@@ -14,6 +14,8 @@ BOTTOM_MARGIN = 22
 TOP_MARGIN = 28
 SMOOTH_RC = 0.25  # seconds
 MATCH_DISTANCE = 1.5  # meters a lane line can move between frames and still be the same line
+OUTER_LINE_PROB = 0.3  # the outer lines only show when the model sees a lane there
+LANE_CHANGE_LENGTH = 0.5  # part of the arrow the lane change crosses over in
 
 PATH_WIDTH = 10
 LANE_WIDTH = 3
@@ -75,6 +77,9 @@ class ArrowView(Widget):
     self._effort = 0.0
     self._curvature = 0.0
     self._lane_change = 0.0
+    self._crossing: _Line | None = None  # the line a lane change crosses
+    self._lane_width = 3.5
+    self._target = 0.0  # lateral offset of the lane change's target lane center
     self._lead = DISTANCE
     self._lead_alpha = 0.0
 
@@ -93,8 +98,10 @@ class ArrowView(Widget):
     # match this frame's lines to the tracked ones by where they are next to the car
     for line in self._lines:
       line.seen = False
-    for lane_line in model.laneLines:
+    for i, lane_line in enumerate(model.laneLines):
       if len(lane_line.x) < 2:
+        continue
+      if i in (0, 3) and not self._road_there(model, i):
         continue
       y = np.interp(self._xs, lane_line.x, lane_line.y)
       free = [t for t in self._lines if not t.seen]
@@ -119,6 +126,7 @@ class ArrowView(Widget):
     self._effort = self._smooth(self._effort, min(effort, 1.0))
     self._curvature = self._smooth(self._curvature, model.action.desiredCurvature)
     self._lane_change = self._smooth(self._lane_change, 0.0 if model.meta.laneChangeState == 'off' else 1.0)
+    self._update_lane_change(model.meta)
 
     lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
@@ -131,6 +139,32 @@ class ArrowView(Widget):
     else:
       self._lead_alpha = self._smooth(self._lead_alpha, 0.0)
 
+  @staticmethod
+  def _road_there(model, i: int) -> bool:
+    # an outer line past the road edge or one the model barely sees is no lane
+    if len(model.laneLineProbs) > i and model.laneLineProbs[i] < OUTER_LINE_PROB:
+      return False
+    edge = model.roadEdges[0 if i == 0 else 1] if len(model.roadEdges) == 2 else None
+    if edge is None or len(edge.y) == 0:
+      return True
+    line = model.laneLines[i].y[0]
+    return line > edge.y[0] if i == 0 else line < edge.y[0]
+
+  def _update_lane_change(self, meta):
+    left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
+    right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
+    changing = meta.laneChangeState in ('laneChangeStarting', 'laneChangeFinishing') and meta.laneChangeDirection != 'none'
+    if not changing:
+      self._crossing = None
+      if left is not None and right is not None:
+        self._lane_width = float(np.clip(right.y[0] - left.y[0], 2.5, 4.5))
+      return
+    # the line toward the new lane at the start is followed as it slides under the car
+    direction = -1 if meta.laneChangeDirection == 'left' else 1
+    if self._crossing is None or self._crossing not in self._lines:
+      self._crossing = left if direction < 0 else right
+    if self._crossing is not None:
+      self._target = float(self._crossing.y[0]) + direction * self._lane_width / 2
 
   def _render(self, rect: rl.Rectangle):
     rl.draw_rectangle_rec(rect, rl.BLACK)
@@ -139,7 +173,7 @@ class ArrowView(Widget):
 
     origin_x, origin_y = rect.x + rect.width / 2, rect.y + rect.height - BOTTOM_MARGIN
     span = rect.height - BOTTOM_MARGIN - TOP_MARGIN
-    xs, plan = self._xs, self._plan
+    plan = self._plan
     left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
     right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
     dist, long_scale = DISTANCE, span / DISTANCE
@@ -164,15 +198,10 @@ class ArrowView(Widget):
 
     def plan_points(end):
       ax, ay = arc(plan[0], end)
-      if left is not None and right is not None:
-        # lane change: shift the arrow by how far the plan leaves the lane center, about a lane at most
-        center = (left.y + right.y) / 2
-        width = max(float(right.y[0] - left.y[0]), 2.5)
-        # the target is where the plan is headed, eased in along the arrow so a short arrow at a lead car still crosses over
-        far = float(np.interp(DISTANCE * 0.8, xs, plan - center) - (plan[0] - center[0]))
-        target = np.clip(far * 4, -width, width)  # a full lane as soon as the plan commits
-        u = np.clip(ax / max(float(ax[-1]), 1.0), 0.0, 1.0)
-        ay = ay + target * (3 * u ** 2 - 2 * u ** 3) * self._lane_change
+      if self._lane_change > 0.01:
+        # lane change: a short s into the target lane's center, then straight on in it
+        u = np.clip(ax / max(float(ax[-1]) * LANE_CHANGE_LENGTH, 1.0), 0.0, 1.0)
+        ay = ay + (self._target - plan[0]) * (3 * u ** 2 - 2 * u ** 3) * self._lane_change
       return to_screen(ax, ay)
 
     engaged = ui_state.status == UIStatus.ENGAGED
