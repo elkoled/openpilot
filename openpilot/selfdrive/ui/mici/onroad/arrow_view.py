@@ -89,7 +89,6 @@ class ArrowView(Widget):
     self._effort = 0.0
     self._lead = DISTANCE
     self._lead_alpha = 0.0
-    self._arrow_alpha = 0.0
 
   def _smooth(self, old, new):
     return old + (new - old) * self._k
@@ -144,7 +143,6 @@ class ArrowView(Widget):
     else:
       self._lead_alpha = self._smooth(self._lead_alpha, 0.0)
 
-    self._arrow_alpha = self._smooth(self._arrow_alpha, 1.0 if ui_state.status == UIStatus.ENGAGED else 0.0)
 
   def _render(self, rect: rl.Rectangle):
     rl.draw_rectangle_rec(rect, rl.BLACK)
@@ -174,10 +172,9 @@ class ArrowView(Widget):
       if color.a > 2:
         _strip(*to_screen(self._xs, line.y), LANE_WIDTH if inner else OUTER_LANE_WIDTH, color)
 
-    # the planned path, ending in an arrowhead or a bar at the lead car, only while engaged
-    alpha = int(255 * self._arrow_alpha)
-    if alpha > 2:
-      path_color = rl.Color(255, 255, 255, alpha)
+    # the planned path, ending in an arrowhead or a bar at the lead car, grey on override, hidden when disengaged
+    if ui_state.status != UIStatus.DISENGAGED:
+      path_color = WHITE if engaged else GREY
       lead_t = self._lead_alpha
       end = DISTANCE + (self._lead - DISTANCE) * lead_t
       head = HEAD_LENGTH / long_scale * (1 - lead_t)
