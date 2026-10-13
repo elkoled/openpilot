@@ -81,7 +81,8 @@ class ArrowView(Widget):
     self._effort = 0.0
     self._curvature = 0.0
     self._lane_change = 0.0
-    self._crossing: _Line | None = None  # the line a lane change crosses
+    self._approaching = False  # a lane change's line is the nearest to the car
+    self._crossed = False  # and the car got past it
     self._lane_width = 3.5
     self._target = 0.0  # lateral offset of the lane change's target lane center
     self._lead = DISTANCE
@@ -184,20 +185,28 @@ class ArrowView(Widget):
     return line > edge.y[0] if i == 0 else line < edge.y[0]
 
   def _update_lane_change(self, meta):
-    left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
-    right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
+    left = max((line for line in self._lines if line.seen and line.y[0] < 0), key=lambda line: line.y[0], default=None)
+    right = min((line for line in self._lines if line.seen and line.y[0] >= 0), key=lambda line: line.y[0], default=None)
+    if left is None or right is None:
+      return
     changing = meta.laneChangeState in ('laneChangeStarting', 'laneChangeFinishing') and meta.laneChangeDirection != 'none'
     if not changing:
-      self._crossing = None
-      if left is not None and right is not None:
-        self._lane_width = float(np.clip(right.y[0] - left.y[0], 2.5, 4.5))
-      return
-    # the line toward the new lane at the start is followed as it slides under the car
-    direction = -1 if meta.laneChangeDirection == 'left' else 1
-    if self._crossing is None or self._crossing not in self._lines:
-      self._crossing = left if direction < 0 else right
-    if self._crossing is not None:
-      self._target = float(self._crossing.y[0]) + direction * self._lane_width / 2
+      self._approaching = self._crossed = False
+      self._lane_width = float(np.clip(right.y[0] - left.y[0], 2.5, 4.5))
+      target = (left.y[0] + right.y[0]) / 2
+    else:
+      # the model snaps the crossed line from one side of the car to the other, so the car is in the new lane
+      # once the nearest line flips away from the turn side, after it got nearest first
+      direction = -1 if meta.laneChangeDirection == 'left' else 1
+      ahead, behind = (left, right) if direction < 0 else (right, left)
+      ahead_nearest = abs(ahead.y[0]) < abs(behind.y[0])
+      self._crossed = self._crossed or (self._approaching and not ahead_nearest)
+      self._approaching = self._approaching or ahead_nearest
+      if self._crossed:
+        target = (left.y[0] + right.y[0]) / 2
+      else:
+        target = ahead.y[0] + direction * self._lane_width / 2
+    self._target = self._smooth(self._target, float(target))
 
   def _render(self, rect: rl.Rectangle):
     rl.draw_rectangle_rec(rect, rl.BLACK)
