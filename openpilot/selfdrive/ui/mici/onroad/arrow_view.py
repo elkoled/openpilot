@@ -30,6 +30,22 @@ LEAD_BAR_HEIGHT = 6
 WHITE = rl.Color(255, 255, 255, 255)
 GREEN = rl.Color(70, 230, 90, 255)
 GREY = rl.Color(150, 150, 150, 255)
+ORANGE = rl.Color(255, 140, 30, 255)
+RED = rl.Color(235, 45, 35, 255)
+MAX_LAT_ACCEL = 3.0  # m/s^2, ISO limit openpilot steers to
+HIGH_EFFORT = 0.65
+
+
+def _blend(a: rl.Color, b: rl.Color, t: float) -> rl.Color:
+  t = float(np.clip(t, 0, 1))
+  return rl.Color(int(a.r + (b.r - a.r) * t), int(a.g + (b.g - a.g) * t), int(a.b + (b.b - a.b) * t), 255)
+
+
+def _effort_color(effort: float) -> rl.Color:
+  # green until 65% of the steering limit, then orange, red at the limit
+  if effort < HIGH_EFFORT:
+    return _blend(GREEN, ORANGE, (effort - HIGH_EFFORT + 0.05) / 0.05)
+  return _blend(ORANGE, RED, (effort - HIGH_EFFORT) / (1 - HIGH_EFFORT))
 
 
 def _strip(px: np.ndarray, py: np.ndarray, width: float, color: rl.Color):
@@ -71,11 +87,20 @@ class ArrowView(Widget):
     self._changing = False
     self._lead = FirstOrderFilter(DISTANCE, 0.3, dt)
     self._lead_alpha = FirstOrderFilter(0.0, 0.2, dt)
+    self._effort = FirstOrderFilter(0.0, 0.2, dt)
     self._lane_alpha = [FirstOrderFilter(0.0, 0.5, dt) for _ in range(4)]
 
   def _update_state(self):
     sm = ui_state.sm
     model = sm['modelV2']
+
+    # how much of the steering limit is used, torque output when the car has one
+    lateral = sm['controlsState'].lateralControlState
+    if lateral.which() == 'torqueState':
+      effort = abs(lateral.torqueState.output)
+    else:
+      effort = abs(model.action.desiredCurvature) * sm['carState'].vEgo ** 2 / MAX_LAT_ACCEL
+    self._effort.update(min(effort, 1.0))
 
     # sideways offset of the arrow tip from the model's curvature, softly limited
     bend = model.action.desiredCurvature * DISTANCE ** 2 / 2
@@ -149,7 +174,7 @@ class ArrowView(Widget):
         _strip(*to_screen(ls, lane_curve + offset * LANE + self._road.x), LANE_WIDTH, rl.Color(GREY.r, GREY.g, GREY.b, alpha))
 
     if ui_state.status == UIStatus.ENGAGED:
-      path_color, edge_color = WHITE, GREEN
+      path_color, edge_color = WHITE, _effort_color(self._effort.x)
     elif ui_state.status == UIStatus.OVERRIDE:
       path_color, edge_color = GREY, None
     else:
