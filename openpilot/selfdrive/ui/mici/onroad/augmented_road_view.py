@@ -10,6 +10,7 @@ from openpilot.selfdrive.ui.mici.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.mici.onroad.long_indicator import LongIndicator
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
+from openpilot.selfdrive.ui.mici.onroad.arrow_view import ArrowView
 from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
@@ -171,6 +172,7 @@ class AugmentedRoadView(CameraView):
     self._bookmark_icon = BookmarkIcon(bookmark_callback)
 
     self._navigation = NavigationPanel()
+    self._arrow_view = ArrowView()
     self._model_renderer = ModelRenderer()
     self._hud_renderer = HudRenderer()
     self._long_indicator = LongIndicator()
@@ -218,9 +220,11 @@ class AugmentedRoadView(CameraView):
 
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
-    # navigating: only the map, full screen, with alerts on top
+    # navigating: the arrow in the left third, the map in the rest, with alerts on top
     if ui_state.navigation_enabled and ui_state.nav_destination_set:
-      self._navigation.render(self.rect)
+      arrow_width = round(self.rect.width / 3)
+      self._arrow_view.render(rl.Rectangle(self.rect.x, self.rect.y, arrow_width, self.rect.height))
+      self._navigation.render(rl.Rectangle(self.rect.x + arrow_width, self.rect.y, self.rect.width - arrow_width, self.rect.height))
       self._alert_renderer.render(self.rect)
       return
 
