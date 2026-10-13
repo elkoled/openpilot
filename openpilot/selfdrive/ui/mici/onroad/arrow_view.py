@@ -16,21 +16,21 @@ DISTANCE = 50.0  # meters the arrow spans
 LANE = 3.7  # meters
 LATERAL_SCALE = 14.0  # px per meter, lateral is stretched and distance squished to fit the panel
 MAX_BEND = 2.4  # meters the arrow tip can bend sideways from curvature
-BOTTOM_MARGIN = 14
-TOP_MARGIN = 26
+BOTTOM_MARGIN = 0
+TOP_MARGIN = 30
 
-PATH_WIDTH = 7
-EDGE_WIDTH = 2
-LANE_WIDTH = 2
+PATH_WIDTH = 10
+LANE_WIDTH = 3
+OUTER_LANE_WIDTH = 2
 HEAD_LENGTH = 16
-HEAD_WIDTH = 22
-LEAD_BAR_WIDTH = 26
-LEAD_BAR_HEIGHT = 6
+HEAD_WIDTH = 26
+LEAD_BAR_WIDTH = 28
+LEAD_BAR_HEIGHT = 7
 
 WHITE = rl.Color(255, 255, 255, 255)
 GREEN = rl.Color(70, 230, 90, 255)
-GREY = rl.Color(150, 150, 150, 255)
-ORANGE = rl.Color(255, 140, 30, 255)
+GREY = rl.Color(110, 110, 110, 255)
+ORANGE = rl.Color(255, 120, 30, 255)
 RED = rl.Color(235, 45, 35, 255)
 MAX_LAT_ACCEL = 3.0  # m/s^2, ISO limit openpilot steers to
 HIGH_EFFORT = 0.65
@@ -38,13 +38,13 @@ HIGH_EFFORT = 0.65
 
 def _blend(a: rl.Color, b: rl.Color, t: float) -> rl.Color:
   t = float(np.clip(t, 0, 1))
-  return rl.Color(int(a.r + (b.r - a.r) * t), int(a.g + (b.g - a.g) * t), int(a.b + (b.b - a.b) * t), 255)
+  return rl.Color(int(a.r + (b.r - a.r) * t), int(a.g + (b.g - a.g) * t), int(a.b + (b.b - a.b) * t), int(a.a + (b.a - a.a) * t))
 
 
-def _effort_color(effort: float) -> rl.Color:
-  # green until 65% of the steering limit, then orange, red at the limit
+def _effort_color(base: rl.Color, effort: float) -> rl.Color:
+  # the lane line keeps its color until 65% of the steering limit, then orange, red at the limit
   if effort < HIGH_EFFORT:
-    return _blend(GREEN, ORANGE, (effort - HIGH_EFFORT + 0.05) / 0.05)
+    return _blend(base, ORANGE, (effort - HIGH_EFFORT + 0.1) / 0.1)
   return _blend(ORANGE, RED, (effort - HIGH_EFFORT) / (1 - HIGH_EFFORT))
 
 
@@ -74,21 +74,22 @@ def _quad(center: rl.Vector2, dx: float, dy: float, half_width: float, half_heig
 
 
 class ArrowView(Widget):
-  """The road ahead as lanes and an arrow: bends with the model's curvature, moves over on lane changes and stops at a lead car."""
+  """The road ahead as lanes and an arrow: the arrow sits where the car is in its lane, bends with the model's curvature,
+  curves into the next lane on lane changes and stops at a lead car."""
 
   def __init__(self):
     super().__init__()
     dt = 1 / gui_app.target_fps
     self._bend = FirstOrderFilter(0.0, 0.4, dt)
-    self._shift = FirstOrderFilter(0.0, 0.5, dt)  # arrow tip, relative to the lanes
-    self._road = FirstOrderFilter(0.0, 0.5, dt)  # lanes, slide over once the car is in the new lane
+    self._center = FirstOrderFilter(0.0, 0.3, dt)  # lane center relative to the car
+    self._road = FirstOrderFilter(0.0, 0.6, dt)  # slides the road over once the car is in the new lane
+    self._tip = FirstOrderFilter(0.0, 0.5, dt)  # arrow tip, relative to the current lane's center
     self._reveal = FirstOrderFilter(0.0, 0.3, dt)  # target lane line during a lane change
-    self._direction = 0
-    self._changing = False
+    self._effort = FirstOrderFilter(0.0, 0.2, dt)
     self._lead = FirstOrderFilter(DISTANCE, 0.3, dt)
     self._lead_alpha = FirstOrderFilter(0.0, 0.2, dt)
-    self._effort = FirstOrderFilter(0.0, 0.2, dt)
-    self._lane_alpha = [FirstOrderFilter(0.0, 0.5, dt) for _ in range(4)]
+    self._direction = 0
+    self._crossed = False
 
   def _update_state(self):
     sm = ui_state.sm
@@ -102,29 +103,40 @@ class ArrowView(Widget):
       effort = abs(model.action.desiredCurvature) * sm['carState'].vEgo ** 2 / MAX_LAT_ACCEL
     self._effort.update(min(effort, 1.0))
 
-    # sideways offset of the arrow tip from the model's curvature, softly limited
     bend = model.action.desiredCurvature * DISTANCE ** 2 / 2
     self._bend.update(MAX_BEND * np.tanh(bend / MAX_BEND))
 
-    # lane change: the arrow leans, then curves into the target lane, then the lanes slide under it
     meta = model.meta
     direction = {LaneChangeDirection.left: -1, LaneChangeDirection.right: 1}.get(meta.laneChangeDirection.raw, 0)
     if direction:
       self._direction = direction
     state = meta.laneChangeState
     changing = state == LaneChangeState.laneChangeStarting
-    if self._changing and not changing:
-      # the target lane becomes the current one, same picture, new reference
-      self._road.x += self._direction * LANE
-    self._changing = changing
-    if changing:
-      shift = self._direction * LANE
-    elif state == LaneChangeState.preLaneChange and direction:
-      shift = direction * LANE * 0.2
-    else:
-      shift = 0.0
-    self._shift.update(shift)
+    if not changing:
+      self._crossed = False
+
+    # where the car is in its lane, from the lane lines next to it
+    lines, probs = model.laneLines, model.laneLineProbs
+    if len(lines) > 2 and len(lines[1].y) and len(lines[2].y) and min(probs[1], probs[2]) > 0.3:
+      center = float(np.clip((lines[1].y[0] + lines[2].y[0]) / 2, -LANE, LANE))
+      jump = np.round((center - self._center.x) / LANE) * LANE
+      if jump:
+        # crossing into the next lane relabels the lines: same picture with the new lane as reference, then the road slides over
+        self._center.x += jump
+        self._road.x += jump
+        self._tip.x -= jump
+        self._crossed = changing
+      self._center.update(center)
     self._road.update(0.0)
+
+    # the arrow points to the lane center, leans on a pending lane change and curves into the target lane during one
+    if changing and not self._crossed:
+      tip = self._direction * LANE
+    elif state == LaneChangeState.preLaneChange and direction:
+      tip = direction * LANE * 0.2
+    else:
+      tip = 0.0
+    self._tip.update(tip)
     self._reveal.update(1.0 if state in (LaneChangeState.preLaneChange, LaneChangeState.laneChangeStarting) and direction else 0.0)
 
     lead = None
@@ -140,58 +152,50 @@ class ArrowView(Widget):
       if self._lead_alpha.x < 0.05:
         self._lead.update(DISTANCE)
 
-    probs = list(model.laneLineProbs) + [0.0] * 4
-    for i, f in enumerate(self._lane_alpha):
-      f.update(max(float(np.clip(probs[i], 0, 1)), 0.5) * (1.0 if i in (1, 2) else 0.4))
-
   def _render(self, rect: rl.Rectangle):
     rl.draw_rectangle_rec(rect, rl.BLACK)
     if not ui_state.sm.alive['modelV2']:
       return
 
-    ego_x, ego_y = rect.x + rect.width / 2, rect.y + rect.height - BOTTOM_MARGIN
+    origin_x, origin_y = rect.x + rect.width / 2, rect.y + rect.height - BOTTOM_MARGIN
     long_scale = (rect.height - BOTTOM_MARGIN - TOP_MARGIN) / DISTANCE
-    s = np.linspace(0.0, DISTANCE, 60)
-    u = s / DISTANCE
-    curve = self._bend.x * u ** 2
 
     def to_screen(x, y):
-      return ego_x + y * LATERAL_SCALE, ego_y - x * long_scale
+      # lateral is relative to the current lane's center, shifted while the road slides over after a lane change
+      return origin_x + (y + self._road.x) * LATERAL_SCALE, origin_y - x * long_scale
 
+    engaged = ui_state.status == UIStatus.ENGAGED
     rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
 
-    # lanes
-    lane_top = DISTANCE + TOP_MARGIN / long_scale
-    ls = np.linspace(0.0, lane_top, 60)
+    # lanes: the current one in the status color, its neighbors grey
+    car = -self._center.x
+    ls = np.linspace(0.0, DISTANCE + TOP_MARGIN / long_scale, 60)
     lane_curve = self._bend.x * (ls / DISTANCE) ** 2
-    lane_alpha = {-2.5: self._lane_alpha[0].x * 0.5, -1.5: self._lane_alpha[0].x, -0.5: self._lane_alpha[1].x,
-                  0.5: self._lane_alpha[2].x, 1.5: self._lane_alpha[3].x, 2.5: self._lane_alpha[3].x * 0.5}
-    if self._direction:
-      lane_alpha[1.5 * self._direction] = max(lane_alpha[1.5 * self._direction], self._reveal.x)
-    for offset, a in lane_alpha.items():
-      alpha = int(255 * min(a, 1.0))
-      if alpha > 2:
-        _strip(*to_screen(ls, lane_curve + offset * LANE + self._road.x), LANE_WIDTH, rl.Color(GREY.r, GREY.g, GREY.b, alpha))
-
-    if ui_state.status == UIStatus.ENGAGED:
-      path_color, edge_color = WHITE, _effort_color(self._effort.x)
-    elif ui_state.status == UIStatus.OVERRIDE:
-      path_color, edge_color = GREY, None
+    lane_color = GREEN if engaged else GREY
+    # near the steering limit the line the car is pushed toward lights up
+    if abs(car) > 0.15:
+      near = -0.5 if car < 0 else 0.5
     else:
-      path_color, edge_color = rl.Color(255, 255, 255, 90), None
+      near = -0.5 if self._bend.x > 0 else 0.5
+    for offset in (-2.5, -1.5, -0.5, 0.5, 1.5, 2.5):
+      inner = abs(offset) == 0.5
+      color = lane_color if inner else GREY
+      if offset == 1.5 * self._direction:
+        color = _blend(GREY, lane_color, self._reveal.x)
+      if offset == near and engaged:
+        color = _effort_color(color, self._effort.x)
+      _strip(*to_screen(ls, lane_curve + offset * LANE), LANE_WIDTH if inner else OUTER_LANE_WIDTH, color)
 
-    # arrow, eased over into the next lane on lane changes, shortened to the lead car
+    path_color = WHITE if engaged else (GREY if ui_state.status == UIStatus.OVERRIDE else rl.Color(255, 255, 255, 90))
+
+    # arrow from the car to where it is headed, shortened to the lead car
     lead_t = self._lead_alpha.x
     end = DISTANCE + (self._lead.x - DISTANCE) * lead_t
     head = HEAD_LENGTH / long_scale * (1 - lead_t)
-    keep = s <= max(end - head, 4.0)
-    x = s[keep]
-    v = x / max(x[-1], 1.0)  # ease over the drawn length so the tip always reaches the target lane
-    shift = self._shift.x * (3 * v ** 2 - 2 * v ** 3)
-    px, py = to_screen(x, curve[keep] + shift)
-
-    if edge_color is not None:
-      _strip(px, py, PATH_WIDTH + 2 * EDGE_WIDTH, edge_color)
+    x = np.linspace(0.0, max(end - head, 4.0), 50)
+    v = x / x[-1]
+    ease = 3 * v ** 2 - 2 * v ** 3
+    px, py = to_screen(x, self._bend.x * (x / DISTANCE) ** 2 + car + (self._tip.x - car) * ease)
     _strip(px, py, PATH_WIDTH, path_color)
 
     tip = rl.Vector2(float(px[-1]), float(py[-1]))
@@ -207,11 +211,6 @@ class ArrowView(Widget):
     if length > 1:
       point = rl.Vector2(tip.x + dx * length, tip.y + dy * length)
       hx, hy = -dy * half_width, dx * half_width
-      if edge_color is not None:
-        e = EDGE_WIDTH
-        grow = 1 + e / 6
-        _triangle(rl.Vector2(point.x + dx * e * 1.5, point.y + dy * e * 1.5), rl.Vector2(tip.x - hx * grow - dx * e, tip.y - hy * grow - dy * e),
-                  rl.Vector2(tip.x + hx * grow - dx * e, tip.y + hy * grow - dy * e), edge_color)
       _triangle(point, rl.Vector2(tip.x - hx, tip.y - hy), rl.Vector2(tip.x + hx, tip.y + hy), path_color)
 
     rl.end_scissor_mode()
