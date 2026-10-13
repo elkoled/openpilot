@@ -187,7 +187,7 @@ class HudRenderer(Widget):
 
     self._draw_model_source(rect)
 
-    self._draw_steering_wheel(rect)
+    self.draw_steering_wheel(rect)
 
   def _draw_model_source(self, rect: rl.Rectangle) -> None:
     loading = ui_state.chestnut_state == ChestnutState.LOADING
@@ -215,7 +215,7 @@ class HudRenderer(Widget):
                      rect.y + rect.height - 14 - (self._txt_wheel.height + icon.height) / 2)
     rl.draw_texture_ex(icon, pos, 0.0, 1.0, rl.Color(255, 255, 255, int(255 * opacity * alpha)))
 
-  def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
+  def draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel
 
     if self._show_wheel_critical:

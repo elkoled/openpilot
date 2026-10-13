@@ -8,7 +8,8 @@ from openpilot.system.ui.widgets import Widget
 
 # a top down view of the model's lane lines and plan, smoothed over time
 DISTANCE = 50.0  # meters the arrow spans
-LATERAL_SCALE = 14.0  # px per meter, lateral is stretched and distance squished to fit the panel
+LATERAL_SCALE = 14.0  # px per meter on a REF_WIDTH panel, lateral is stretched and distance squished to fit the panel
+REF_WIDTH = 179
 BOTTOM_MARGIN = 22
 TOP_MARGIN = 28
 SMOOTH_RC = 0.25  # seconds
@@ -142,12 +143,13 @@ class ArrowView(Widget):
     left = max((line for line in self._lines if line.y[0] < 0), key=lambda line: line.y[0], default=None)
     right = min((line for line in self._lines if line.y[0] >= 0), key=lambda line: line.y[0], default=None)
     dist, long_scale = DISTANCE, span / DISTANCE
+    lateral_scale = LATERAL_SCALE * rect.width / REF_WIDTH
 
     def to_screen(x, y):
-      return origin_x + np.asarray(y) * LATERAL_SCALE, origin_y - np.asarray(x) * long_scale
+      return origin_x + np.asarray(y) * lateral_scale, origin_y - np.asarray(x) * long_scale
 
     # the heading cap in meters that looks like MAX_HEADING on screen, lateral is stretched
-    cap = np.arctan(np.tan(np.radians(MAX_HEADING)) * long_scale / LATERAL_SCALE)
+    cap = np.arctan(np.tan(np.radians(MAX_HEADING)) * long_scale / lateral_scale)
 
     def arc(y0, length):
       # an arc of the steering curvature, straight at the car and bending toward the top, offset sideways by y0

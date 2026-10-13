@@ -38,6 +38,7 @@ WIDE_CAM_MAX_SPEED = 5.0  # m/s (11 mph)
 ROAD_CAM_MIN_SPEED = 10.0  # m/s (22 mph)
 
 CAM_Y_OFFSET = 20
+NAV_ICONS_WIDTH = 92  # dmoji, lead car and wheel column beside the arrow
 
 
 class BookmarkIcon(Widget):
@@ -223,11 +224,22 @@ class AugmentedRoadView(CameraView):
     self._alert_renderer.hidden_events = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if navigating else set()
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
-    # navigating: the arrow in the left third, the map in the rest, with alerts on top
+    # navigating: the status icons on the left, then the arrow, the map in the right two thirds, with alerts on top
     if navigating:
-      arrow_width = round(self.rect.width / 3)
-      self._arrow_view.render(rl.Rectangle(self.rect.x, self.rect.y, arrow_width, self.rect.height))
-      self._navigation.render(rl.Rectangle(self.rect.x + arrow_width, self.rect.y, self.rect.width - arrow_width, self.rect.height))
+      map_x = self.rect.x + round(self.rect.width / 3)
+      icons = rl.Rectangle(self.rect.x, self.rect.y, NAV_ICONS_WIDTH, self.rect.height)
+      rl.draw_rectangle_rec(icons, rl.BLACK)
+      self._driver_state_renderer.set_should_draw(ui_state.status != UIStatus.DISENGAGED or ui_state.always_on_dm)
+      self._driver_state_renderer.set_position(icons.x + 16, icons.y + 10)
+      self._driver_state_renderer.render()
+      self._long_indicator.set_should_draw(True)
+      self._long_indicator.render(icons)
+      self._hud_renderer.set_wheel_critical_icon(alert_to_render is not None and not not_animating_out and
+                                                 alert_to_render.visual_alert == car.CarControl.HUDControl.VisualAlert.steerRequired)
+      self._hud_renderer.draw_steering_wheel(icons)
+
+      self._arrow_view.render(rl.Rectangle(icons.x + icons.width, self.rect.y, map_x - icons.x - icons.width, self.rect.height))
+      self._navigation.render(rl.Rectangle(map_x, self.rect.y, self.rect.x + self.rect.width - map_x, self.rect.height))
       self._alert_renderer.render(self.rect)
       return
 
