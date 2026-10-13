@@ -17,7 +17,7 @@ import requests
 import openpilot.cereal.messaging as messaging
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.navigation.mapsd import MapsD
-from openpilot.selfdrive.navigation.navd import REROUTE_COUNTER_MIN, ROUTE_RESEND_PERIOD, RouteEngine, set_banner
+from openpilot.selfdrive.navigation.navd import REROUTE_COUNTER_MIN, RETRY_HOLD, ROUTE_RESEND_PERIOD, RouteEngine, set_banner
 from openpilot.selfdrive.navigation.pmtiles import PMTiles, decode_directory, tile_id
 from openpilot.selfdrive.navigation.renderer import MAJOR, MEDIUM, MINOR, SIZE, STREET, TRACK, MapRenderer, draw_segments, mercator, project, stroke_widths
 from openpilot.selfdrive.navigation.route import RouteTracker
@@ -334,16 +334,16 @@ class TestRouteEngine(unittest.TestCase):
     self.engine.last_position = (0.0024, 0)  # driving away from the destination
     self.engine.send_instruction()
     self.assertIsNone(self.engine.route)
-    self.assertNotIn('NavDestination', self.values)
+    self.assertIn('NavDestination', self.values)  # kept, the next recompute routes back to it
 
-  def test_failed_request_clears_route(self):
+  def test_failed_request_keeps_route_and_retries(self):
     self.load_route()
+    route = self.engine.route
     self.response.raise_for_status.side_effect = requests.HTTPError('test failure')
     self.load_route()
-    self.assertIsNone(self.engine.route)
-    self.assertEqual(len(self.last_message('navRoute').navRoute.coordinates), 0)
-    self.engine.send_instruction()
-    self.assertFalse(self.last_message('navInstruction').valid)
+    self.assertIs(self.engine.route, route)
+    self.assertEqual(len(self.last_message('navRoute').navRoute.coordinates), 5)
+    self.assertEqual(self.engine.recompute_hold, RETRY_HOLD)
 
   def test_gps_source(self):
     fixes = {'gpsLocation': SimpleNamespace(hasFix=True, latitude=1, longitude=1, bearingDeg=180),

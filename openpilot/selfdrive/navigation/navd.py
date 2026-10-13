@@ -17,6 +17,7 @@ MANEUVER_TRANSITION_THRESHOLD = 10
 REROUTE_COUNTER_MIN = 3
 ROUTE_RESEND_PERIOD = 10  # updates (seconds); a restarted mapsd gets the route within this
 RECOMPUTE_HOLD = 10  # updates (seconds) between route requests
+RETRY_HOLD = 2  # updates (seconds) before retrying a failed route request
 
 
 def set_banner(instruction, banners, distance_to_maneuver):
@@ -97,7 +98,6 @@ class RouteEngine:
   def calculate_route(self, destination):
     assert self.last_position is not None
     cloudlog.warning(f"Calculating route {self.last_position} -> {destination}")
-    self.nav_destination = destination
 
     lang = self.params.get('LanguageSetting')
     if lang is not None:
@@ -128,6 +128,7 @@ class RouteEngine:
       resp.raise_for_status()
 
       r = resp.json()
+      self.nav_destination = destination
       if len(r['routes']):
         self.route = r['routes'][0]['legs'][0]['steps']
         self.route_geometry = [np.array(step['geometry']['coordinates'], dtype=np.float64).reshape((-1, 2)) for step in self.route]
@@ -140,8 +141,9 @@ class RouteEngine:
         self.clear_route()
 
     except requests.exceptions.RequestException:
+      # keep the current route and retry soon, a slow or dropped connection shouldn't end navigation
       cloudlog.exception("failed to get route")
-      self.clear_route()
+      self.recompute_hold = RETRY_HOLD
 
   def send_instruction(self):
     msg = messaging.new_message('navInstruction', valid=True)
@@ -169,7 +171,8 @@ class RouteEngine:
     # Maneuvers not yet passed, for the model's navigation input
     progress = self.route_tracker.project(*self.last_position)
     msg.navInstruction.allManeuvers = [
-      {'distance': float(distance - progress), 'type': step['maneuver']['type'], 'modifier': step['maneuver'].get('modifier', '')}
+      {'distance': float(distance - progress), 'type': step.get('maneuver', {}).get('type', ''),
+       'modifier': step.get('maneuver', {}).get('modifier', '')}
       for step, distance in zip(self.route, self.maneuver_distances, strict=True) if distance >= progress]
 
     # Total remaining distance and time: the rest of this step, then every step after it
@@ -188,9 +191,8 @@ class RouteEngine:
       else:
         cloudlog.warning("Destination reached")
 
-        # Clear route if driving away from destination
+        # driving away from the destination routes back to it, it stays set
         if np.linalg.norm(local_meters(self.last_position, self.nav_destination)) > REROUTE_DISTANCE:
-          self.params.remove("NavDestination")
           self.clear_route()
 
   def send_route(self):
