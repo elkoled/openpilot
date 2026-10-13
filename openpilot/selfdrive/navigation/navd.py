@@ -17,6 +17,7 @@ MANEUVER_TRANSITION_THRESHOLD = 10
 REROUTE_COUNTER_MIN = 3
 ROUTE_RESEND_PERIOD = 10  # updates (seconds); a restarted mapsd gets the route within this
 RECOMPUTE_HOLD = 10  # updates (seconds) between route requests
+DEFAULT_DESTINATION = {"latitude": 32.751436, "longitude": -117.196093}  # always navigate here when nothing else is set
 
 
 def set_banner(instruction, banners, distance_to_maneuver):
@@ -79,9 +80,8 @@ class RouteEngine:
 
     destination = self.params.get("NavDestination")
     if destination is None:
-      self.clear_route()
-      self.recompute_hold = 0
-      return
+      destination = DEFAULT_DESTINATION
+      self.params.put("NavDestination", destination)
     new_destination = (destination['longitude'], destination['latitude'])
 
     # Don't recompute when GPS drifts in tunnels
