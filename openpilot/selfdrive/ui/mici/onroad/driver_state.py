@@ -42,6 +42,7 @@ class DriverStateRenderer(Widget):
     self._face_pitch = 0.
     self._face_yaw = 0.
     self._should_draw = False
+    self.hidden_events: set[str] = set()  # alerts not shown, so they don't hide the dmoji either
     self._force_active = False
     self._looking_center = False
     self._awareness_unfull = False
@@ -76,7 +77,8 @@ class DriverStateRenderer(Widget):
 
   @property
   def should_draw(self):
-    return (self._should_draw and ui_state.sm["selfdriveState"].alertSize == AlertSize.none and
+    ss = ui_state.sm["selfdriveState"]
+    return (self._should_draw and (ss.alertSize == AlertSize.none or ss.alertType.split('/')[0] in self.hidden_events) and
             ui_state.sm.recv_frame["driverStateV2"] > ui_state.started_frame)
 
   def set_force_active(self, force_active: bool):

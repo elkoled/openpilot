@@ -227,7 +227,8 @@ class AugmentedRoadView(CameraView):
 
     # the arrow view shows lane changes itself
     nav_view = ui_state.navigation_enabled
-    self._alert_renderer.hidden_events = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if nav_view else set()
+    hidden = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if nav_view else set()
+    self._alert_renderer.hidden_events = self._driver_state_renderer.hidden_events = self._long_indicator.hidden_events = hidden
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
     self._picker_shown = nav_view and not ui_state.nav_destination_set
 
