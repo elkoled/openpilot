@@ -1,15 +1,23 @@
 import numpy as np
 import pyray as rl
+from openpilot.cereal import log
 
+from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
+from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.shader_polygon import draw_polygon
 from openpilot.system.ui.widgets import Widget
 
-# birdseye squished to fit the panel: lateral meters are stretched, distance compressed
-LATERAL_SCALE = 14.0  # px per meter
-MAX_DISTANCE = 60.0  # meters shown ahead
+LaneChangeState = log.LaneChangeState
+LaneChangeDirection = log.LaneChangeDirection
+
+# a stylized top down view of what the model is doing, not its raw plan
+DISTANCE = 50.0  # meters the arrow spans
+LANE = 3.7  # meters
+LATERAL_SCALE = 14.0  # px per meter, lateral is stretched and distance squished to fit the panel
+MAX_BEND = 2.4  # meters the arrow tip can bend sideways from curvature
 BOTTOM_MARGIN = 14
-TOP_MARGIN = 22
+TOP_MARGIN = 26
 
 PATH_WIDTH = 7
 EDGE_WIDTH = 2
@@ -21,7 +29,7 @@ LEAD_BAR_HEIGHT = 6
 
 WHITE = rl.Color(255, 255, 255, 255)
 GREEN = rl.Color(70, 230, 90, 255)
-GREY = rl.Color(170, 170, 170, 255)
+GREY = rl.Color(150, 150, 150, 255)
 
 
 def _strip(px: np.ndarray, py: np.ndarray, width: float, color: rl.Color):
@@ -40,81 +48,119 @@ def _triangle(a: rl.Vector2, b: rl.Vector2, c: rl.Vector2, color: rl.Color):
   rl.draw_triangle(a, c, b, color)
 
 
-class ArrowView(Widget):
-  """Top down arrow of the model's path between its lane lines."""
+def _quad(center: rl.Vector2, dx: float, dy: float, half_width: float, half_height: float, color: rl.Color):
+  hx, hy = -dy * half_width, dx * half_width
+  tx, ty = dx * half_height, dy * half_height
+  a, b = rl.Vector2(center.x - hx - tx, center.y - hy - ty), rl.Vector2(center.x + hx - tx, center.y + hy - ty)
+  c, d = rl.Vector2(center.x + hx + tx, center.y + hy + ty), rl.Vector2(center.x - hx + tx, center.y - hy + ty)
+  _triangle(a, b, c, color)
+  _triangle(a, c, d, color)
 
-  def _lead_distance(self) -> float | None:
+
+class ArrowView(Widget):
+  """The road ahead as lanes and an arrow: bends with the model's curvature, moves over on lane changes and stops at a lead car."""
+
+  def __init__(self):
+    super().__init__()
+    dt = 1 / gui_app.target_fps
+    self._bend = FirstOrderFilter(0.0, 0.4, dt)
+    self._shift = FirstOrderFilter(0.0, 0.6, dt)
+    self._lead = FirstOrderFilter(DISTANCE, 0.3, dt)
+    self._lead_alpha = FirstOrderFilter(0.0, 0.2, dt)
+    self._lane_alpha = [FirstOrderFilter(0.0, 0.5, dt) for _ in range(4)]
+
+  def _update_state(self):
     sm = ui_state.sm
+    model = sm['modelV2']
+
+    # sideways offset of the arrow tip from the model's curvature, softly limited
+    bend = model.action.desiredCurvature * DISTANCE ** 2 / 2
+    self._bend.update(MAX_BEND * np.tanh(bend / MAX_BEND))
+
+    meta = model.meta
+    direction = {LaneChangeDirection.left: -1, LaneChangeDirection.right: 1}.get(meta.laneChangeDirection, 0)
+    self._shift.update(direction * LANE if meta.laneChangeState == LaneChangeState.laneChangeStarting else 0.0)
+
+    lead = None
     if sm.alive['radarState'] and sm['radarState'].leadOne.present:
-      return float(sm['radarState'].leadOne.dRel)
-    leads = sm['modelV2'].leadsV3
-    if len(leads) and leads[0].prob > 0.5:
-      return float(leads[0].x[0])
-    return None
+      lead = sm['radarState'].leadOne.dRel
+    elif len(model.leadsV3) and model.leadsV3[0].prob > 0.5:
+      lead = model.leadsV3[0].x[0]
+    if lead is not None and lead < DISTANCE:
+      self._lead.update(lead)
+      self._lead_alpha.update(1.0)
+    else:
+      self._lead_alpha.update(0.0)
+      if self._lead_alpha.x < 0.05:
+        self._lead.update(DISTANCE)
+
+    probs = list(model.laneLineProbs) + [0.0] * 4
+    for i, f in enumerate(self._lane_alpha):
+      f.update(float(np.clip(probs[i], 0, 1)) * (1.0 if i in (1, 2) else 0.4))
 
   def _render(self, rect: rl.Rectangle):
     rl.draw_rectangle_rec(rect, rl.BLACK)
-    model = ui_state.sm['modelV2']
-    if not ui_state.sm.alive['modelV2'] or len(model.position.x) < 2:
+    if not ui_state.sm.alive['modelV2']:
       return
 
     ego_x, ego_y = rect.x + rect.width / 2, rect.y + rect.height - BOTTOM_MARGIN
-    long_scale = (rect.height - BOTTOM_MARGIN - TOP_MARGIN) / MAX_DISTANCE
+    long_scale = (rect.height - BOTTOM_MARGIN - TOP_MARGIN) / DISTANCE
+    s = np.linspace(0.0, DISTANCE, 60)
+    u = s / DISTANCE
+    curve = self._bend.x * u ** 2
 
     def to_screen(x, y):
-      return ego_x + np.asarray(y) * LATERAL_SCALE, ego_y - np.asarray(x) * long_scale
+      return ego_x + y * LATERAL_SCALE, ego_y - x * long_scale
 
     rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
 
-    # lane lines, faded by confidence
-    probs = list(model.laneLineProbs)
-    for i, line in enumerate(model.laneLines):
-      if len(line.x) < 2:
-        continue
-      s = np.arange(0.0, MAX_DISTANCE, 1.0)
-      x = np.clip(s, line.x[0], line.x[-1])
-      lx, ly = to_screen(x, np.interp(x, line.x, line.y))
-      alpha = int(255 * np.clip(probs[i] if i < len(probs) else 0, 0, 1) * (1.0 if i in (1, 2) else 0.5))
-      _strip(lx, ly, LANE_WIDTH, rl.Color(GREY.r, GREY.g, GREY.b, alpha))
-
-    # path, resampled every meter, ending at the lead car if there is one
-    xs, ys = np.array(model.position.x), np.array(model.position.y)
-    lead = self._lead_distance()
-    end = min(MAX_DISTANCE, xs[-1], lead if lead is not None else MAX_DISTANCE)
-    head = 0.0 if lead is not None and lead < MAX_DISTANCE else HEAD_LENGTH / long_scale
-    x = np.arange(0.0, max(end - head, 2.0), 0.5)
-    px, py = to_screen(x, np.interp(x, xs, ys))
+    # lanes
+    lane_top = DISTANCE + TOP_MARGIN / long_scale
+    ls = np.linspace(0.0, lane_top, 60)
+    lane_curve = self._bend.x * (ls / DISTANCE) ** 2
+    for i, offset in enumerate((-1.5, -0.5, 0.5, 1.5)):
+      alpha = int(255 * self._lane_alpha[i].x)
+      if alpha > 2:
+        _strip(*to_screen(ls, lane_curve + offset * LANE), LANE_WIDTH, rl.Color(GREY.r, GREY.g, GREY.b, alpha))
 
     if ui_state.status == UIStatus.ENGAGED:
       path_color, edge_color = WHITE, GREEN
     elif ui_state.status == UIStatus.OVERRIDE:
       path_color, edge_color = GREY, None
     else:
-      path_color, edge_color = rl.Color(255, 255, 255, 110), None
+      path_color, edge_color = rl.Color(255, 255, 255, 90), None
+
+    # arrow, eased over into the next lane on lane changes, shortened to the lead car
+    lead_t = self._lead_alpha.x
+    end = DISTANCE + (self._lead.x - DISTANCE) * lead_t
+    head = HEAD_LENGTH / long_scale * (1 - lead_t)
+    keep = s <= max(end - head, 4.0)
+    x = s[keep]
+    shift = self._shift.x * (3 * u[keep] ** 2 - 2 * u[keep] ** 3)
+    px, py = to_screen(x, curve[keep] + shift)
 
     if edge_color is not None:
       _strip(px, py, PATH_WIDTH + 2 * EDGE_WIDTH, edge_color)
     _strip(px, py, PATH_WIDTH, path_color)
 
     tip = rl.Vector2(float(px[-1]), float(py[-1]))
-    dx, dy = px[-1] - px[-3], py[-1] - py[-3]
+    dx, dy = px[-1] - px[-2], py[-1] - py[-2]
     norm = max(float(np.hypot(dx, dy)), 1e-6)
     dx, dy = dx / norm, dy / norm
-    if head == 0.0:
-      # lead car: the arrowhead flattens into a bar at its distance
-      hx, hy = -dy * LEAD_BAR_WIDTH / 2, dx * LEAD_BAR_WIDTH / 2
-      tx, ty = dx * LEAD_BAR_HEIGHT / 2, dy * LEAD_BAR_HEIGHT / 2
-      a, b = rl.Vector2(tip.x - hx - tx, tip.y - hy - ty), rl.Vector2(tip.x + hx - tx, tip.y + hy - ty)
-      c, d = rl.Vector2(tip.x + hx + tx, tip.y + hy + ty), rl.Vector2(tip.x - hx + tx, tip.y - hy + ty)
-      _triangle(a, b, c, path_color)
-      _triangle(a, c, d, path_color)
-    else:
-      hx, hy = -dy * HEAD_WIDTH / 2, dx * HEAD_WIDTH / 2
-      point = rl.Vector2(tip.x + dx * HEAD_LENGTH, tip.y + dy * HEAD_LENGTH)
+
+    # the arrowhead flattens into a bar as a lead car appears
+    length = HEAD_LENGTH * (1 - lead_t)
+    half_width = HEAD_WIDTH / 2 + (LEAD_BAR_WIDTH - HEAD_WIDTH) / 2 * lead_t
+    if lead_t > 0.02:
+      _quad(tip, dx, dy, half_width, LEAD_BAR_HEIGHT / 2 * lead_t, path_color)
+    if length > 1:
+      point = rl.Vector2(tip.x + dx * length, tip.y + dy * length)
+      hx, hy = -dy * half_width, dx * half_width
       if edge_color is not None:
         e = EDGE_WIDTH
-        _triangle(rl.Vector2(point.x + dx * e, point.y + dy * e), rl.Vector2(tip.x - hx * (1 + e / 8) - dx * e, tip.y - hy * (1 + e / 8) - dy * e),
-                  rl.Vector2(tip.x + hx * (1 + e / 8) - dx * e, tip.y + hy * (1 + e / 8) - dy * e), edge_color)
+        grow = 1 + e / 6
+        _triangle(rl.Vector2(point.x + dx * e * 1.5, point.y + dy * e * 1.5), rl.Vector2(tip.x - hx * grow - dx * e, tip.y - hy * grow - dy * e),
+                  rl.Vector2(tip.x + hx * grow - dx * e, tip.y + hy * grow - dy * e), edge_color)
       _triangle(point, rl.Vector2(tip.x - hx, tip.y - hy), rl.Vector2(tip.x + hx, tip.y + hy), path_color)
 
     rl.end_scissor_mode()
