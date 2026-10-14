@@ -53,6 +53,10 @@ class TurnIntent(Widget):
     self._txt_turn_intent_left: rl.Texture = gui_app.texture('icons_mici/turn_intent_left.png', 50, 20)
     self._txt_turn_intent_right: rl.Texture = gui_app.texture('icons_mici/turn_intent_left.png', 50, 20, flip_x=True)
 
+  @property
+  def alpha(self) -> float:
+    return self._turn_intent_alpha_filter.x
+
   def _render(self, _):
     if self._turn_intent_alpha_filter.x > 1e-2:
       turn_intent_texture = self._txt_turn_intent_right if self._turn_intent_direction == 1 else self._txt_turn_intent_left
@@ -132,6 +136,10 @@ class HudRenderer(Widget):
 
     self._set_speed_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
     self._chestnut_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
+
+  @property
+  def turn_intent_alpha(self) -> float:
+    return self._turn_intent.alpha
 
   def set_wheel_critical_icon(self, critical: bool):
     """Set the wheel icon to critical or normal state."""

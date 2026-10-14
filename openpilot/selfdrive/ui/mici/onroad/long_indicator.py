@@ -24,6 +24,7 @@ class LongIndicator(Widget):
     self._personality_changed_time = -HIGHLIGHT_TIME
     self._should_draw = False
     self.hidden_events: set[str] = set()  # alerts not shown, so they don't hide the indicator either
+    self.bars_alpha = 1.0  # the bars make way for other icons
 
   @staticmethod
   def _texture(name: str, width: int, height: int) -> rl.Texture:
@@ -45,7 +46,7 @@ class LongIndicator(Widget):
     visible = self._should_draw and (ss.alertSize == log.SelfdriveState.AlertSize.none or ss.alertType.split('/')[0] in self.hidden_events)
     alpha = self._alpha_filter.update(visible)
     self._draw_lead_car(rect, alpha)
-    self._draw_distance_bars(rect, alpha, visible)
+    self._draw_distance_bars(rect, alpha * self.bars_alpha, visible)
 
   def _draw_lead_car(self, rect: rl.Rectangle, alpha: float) -> None:
     sm = ui_state.sm

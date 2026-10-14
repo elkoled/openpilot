@@ -242,6 +242,8 @@ class AugmentedRoadView(CameraView):
       self._driver_state_renderer.set_position(icons.x + 16, icons.y + 10)
       self._driver_state_renderer.render()
       self._long_indicator.set_should_draw(True)
+      # the turn signal arrow above the wheel takes the bottom bar's place in this narrow column
+      self._long_indicator.bars_alpha = 1.0 - self._hud_renderer.turn_intent_alpha
       self._long_indicator.render(icons)
       self._hud_renderer.set_wheel_critical_icon(alert_to_render is not None and not not_animating_out and
                                                  alert_to_render.visual_alert == car.CarControl.HUDControl.VisualAlert.steerRequired)
@@ -290,6 +292,7 @@ class AugmentedRoadView(CameraView):
     self._driver_state_renderer.set_position(self._rect.x + 16, self._rect.y + 10)
     self._driver_state_renderer.render()
     self._long_indicator.set_should_draw(not self._hud_renderer.drawing_top_icons())
+    self._long_indicator.bars_alpha = 1.0
     self._long_indicator.render(self._content_rect)
 
     self._hud_renderer.set_can_draw_top_icons(alert_to_render is None)
