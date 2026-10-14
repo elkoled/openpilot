@@ -9,16 +9,17 @@ from openpilot.selfdrive.ui.mici.layouts.nav_destination import active_card, car
 from openpilot.selfdrive.ui.ui_state import ui_state
 
 
-@pytest.mark.parametrize("started, navigation_enabled, destination_set, visible", [
-  (False, True, False, True),   # offroad, swiping right shows the picker
-  (False, True, True, True),    # offroad it stays, to change the destination
-  (True, True, False, True),    # onroad without a destination, the picker first
-  (True, True, True, False),    # onroad with one, the arrow and map
-  (False, False, False, False),  # navigation off
-  (True, False, False, False),
+@pytest.mark.parametrize("started, navigation_enabled, destination_set, covered, visible", [
+  (False, True, False, False, True),   # offroad, swiping right shows the picker
+  (False, True, True, False, True),    # offroad it stays, to change the destination
+  (True, True, False, False, True),    # onroad without a destination, the picker first
+  (True, True, True, False, False),    # onroad with one, the arrow and map
+  (True, True, False, True, False),    # reversing or a full screen alert, the cards showed through it
+  (False, False, False, False, False),  # navigation off
+  (True, False, False, False, False),
 ])
-def test_picker_visible(started, navigation_enabled, destination_set, visible):
-  assert picker_visible(started, navigation_enabled, destination_set) == visible
+def test_picker_visible(started, navigation_enabled, destination_set, covered, visible):
+  assert picker_visible(started, navigation_enabled, destination_set, covered) == visible
 
 
 def test_no_default_destination():

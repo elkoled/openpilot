@@ -24,9 +24,10 @@ GREEN = rl.Color(70, 230, 90, 255)
 KM_PER_MILE = 1.609344
 
 
-def picker_visible(started: bool, navigation_enabled: bool, destination_set: bool) -> bool:
+def picker_visible(started: bool, navigation_enabled: bool, destination_set: bool, covered: bool = False) -> bool:
   # offroad it's always there to pick or change the destination, onroad until one is set
-  return navigation_enabled and (not started or not destination_set)
+  # never in reverse or behind a full screen alert, its cards showed through and took taps
+  return navigation_enabled and (not started or not (destination_set or covered))
 
 
 def active_card(destination: dict | None, home: dict | None, work: dict | None) -> str | None:

@@ -214,7 +214,8 @@ class AugmentedRoadView(CameraView):
       super()._handle_mouse_release(mouse_pos)
 
   def _render(self, _):
-    self._picker_shown = picker_visible(ui_state.started, ui_state.navigation_enabled, ui_state.nav_destination_set)
+    covered = ui_state.sm["carState"].gearShifter == "reverse" or ui_state.sm["selfdriveState"].alertSize == "full"
+    self._picker_shown = picker_visible(ui_state.started, ui_state.navigation_enabled, ui_state.nav_destination_set, covered)
 
     # Draw text if not onroad, or the destination picker with navigation on
     if not ui_state.started:
