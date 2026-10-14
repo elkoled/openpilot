@@ -1,6 +1,7 @@
 import pyray as rl
 import openpilot.cereal.messaging as messaging
 from openpilot.selfdrive.ui.mici.layouts.home import MiciHomeLayout
+from openpilot.selfdrive.ui.mici.layouts.nav_destination import covered
 from openpilot.selfdrive.ui.mici.layouts.settings.settings import SettingsLayout
 from openpilot.selfdrive.ui.mici.layouts.offroad_alerts import MiciOffroadAlerts
 from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import AugmentedRoadView
@@ -23,6 +24,7 @@ class MiciMainLayout(Scroller):
 
     self._prev_onroad = False
     self._prev_standstill = False
+    self._prev_covered = False
     self._onroad_time_delay: float | None = None
     self._setup = False
 
@@ -129,6 +131,12 @@ class MiciMainLayout(Scroller):
     if not CS.standstill and self._prev_standstill:
       gui_app.pop_widgets_to(self, lambda: self._scroll_to(self._onroad_layout))
     self._prev_standstill = CS.standstill
+
+    # reverse or a full screen alert closes dialogs like the destination search, they hid the alert
+    now_covered = ui_state.started and covered(ui_state.sm)
+    if now_covered and not self._prev_covered:
+      gui_app.pop_widgets_to(self, lambda: self._scroll_to(self._onroad_layout))
+    self._prev_covered = now_covered
 
   def _on_interactive_timeout(self):
     # Don't pop if onboarding

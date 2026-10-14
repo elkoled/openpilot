@@ -24,6 +24,11 @@ GREEN = rl.Color(70, 230, 90, 255)
 KM_PER_MILE = 1.609344
 
 
+def covered(sm) -> bool:
+  # reverse or a full screen alert, nothing nav should sit on top of or show through
+  return sm["carState"].gearShifter == "reverse" or sm["selfdriveState"].alertSize == "full"
+
+
 def picker_visible(started: bool, navigation_enabled: bool, destination_set: bool, covered: bool = False) -> bool:
   # offroad it's always there to pick or change the destination, onroad until one is set
   # never in reverse or behind a full screen alert, its cards showed through and took taps
@@ -57,7 +62,7 @@ def pick_place(place: Place, save_as: str | None = None):
 
 
 def open_destination_search(hint: str = "enter address...", save_as: str | None = None, text: str = ""):
-  gui_app.push_widget(SearchDialog(hint, text, lambda query: gui_app.push_widget(DestinationResults(query, hint, save_as))))
+  gui_app.push_widget(BigInputDialog(hint, default_text=text, confirm_callback=lambda query: gui_app.push_widget(DestinationResults(query, hint, save_as))))
 
 
 def saved_position(data: bytes | None) -> tuple[float, float] | None:
@@ -188,15 +193,6 @@ class DestinationPicker(Widget):
       x += width + self.GAP
 
 
-class SearchDialog(BigInputDialog):
-  """The keyboard with a magnifier in place of the enter arrow."""
-
-  def __init__(self, hint: str, text: str, confirm_callback):
-    super().__init__(hint, default_text=text, confirm_callback=confirm_callback)
-    self._enter_img = gui_app.texture(ICONS + "search_enter.png", 76, 62)
-    self._enter_disabled_img = gui_app.texture(ICONS + "search_enter_disabled.png", 76, 62)
-
-
 class ResultCard(NavCard):
   WIDTH, HEIGHT = 360, 160
   PAD = 26
@@ -237,7 +233,7 @@ class DestinationResults(NavScroller):
     super().__init__()
     self._query, self._hint, self._save_as = query, hint, save_as
     self._font = gui_app.font(FontWeight.ROMAN)
-    self._search_icon = gui_app.texture(ICONS + "search_enter.png", 76, 62)
+    self._search_icon = gui_app.texture("icons_mici/settings/keyboard/enter.png", 76, 62)
     self._backspace = gui_app.texture("icons_mici/settings/keyboard/backspace.png", 42, 36)
     self._result: list[Place] | str | None = None  # places, or an error message
     self._status = StatusCard("searching...", query)

@@ -5,7 +5,7 @@ import pytest
 import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.navigation.geocode import Place
-from openpilot.selfdrive.ui.mici.layouts.nav_destination import active_card, card_text, pick_place, picker_visible, saved_position
+from openpilot.selfdrive.ui.mici.layouts.nav_destination import active_card, card_text, covered, pick_place, picker_visible, saved_position
 from openpilot.selfdrive.ui.ui_state import ui_state
 
 
@@ -20,6 +20,18 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 ])
 def test_picker_visible(started, navigation_enabled, destination_set, covered, visible):
   assert picker_visible(started, navigation_enabled, destination_set, covered) == visible
+
+
+@pytest.mark.parametrize("gear, alert_size, expected", [
+  ("drive", "none", False),
+  ("drive", "mid", False),
+  ("reverse", "none", True),
+  ("drive", "full", True),   # take control, seatbelt, ...
+])
+def test_covered(gear, alert_size, expected):
+  cs, ss = messaging.new_message("carState").carState, messaging.new_message("selfdriveState").selfdriveState
+  cs.gearShifter, ss.alertSize = gear, alert_size
+  assert covered({"carState": cs, "selfdriveState": ss}) == expected
 
 
 def test_no_default_destination():

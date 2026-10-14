@@ -12,7 +12,7 @@ from openpilot.selfdrive.ui.mici.onroad.long_indicator import LongIndicator
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.arrow_view import ArrowView
 from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel
-from openpilot.selfdrive.ui.mici.layouts.nav_destination import DestinationPicker, picker_visible
+from openpilot.selfdrive.ui.mici.layouts.nav_destination import DestinationPicker, covered, picker_visible
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent, TextAlignment, TextAlignmentVertical
@@ -214,8 +214,7 @@ class AugmentedRoadView(CameraView):
       super()._handle_mouse_release(mouse_pos)
 
   def _render(self, _):
-    covered = ui_state.sm["carState"].gearShifter == "reverse" or ui_state.sm["selfdriveState"].alertSize == "full"
-    self._picker_shown = picker_visible(ui_state.started, ui_state.navigation_enabled, ui_state.nav_destination_set, covered)
+    self._picker_shown = picker_visible(ui_state.started, ui_state.navigation_enabled, ui_state.nav_destination_set, covered(ui_state.sm))
 
     # Draw text if not onroad, or the destination picker with navigation on
     if not ui_state.started:
