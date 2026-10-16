@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # Fits the VW MEB EPS response (delay, lag, gain) per speed band from normal engaged driving, at the stock steering power.
-# Prints a table and can write the baseline the onroad EPS test screen draws against the live response.
-# usage: meb_eps_fit.py <route or segment range> [--baseline /data/meb_eps_baseline.json]
+# Prints a table and the STOCK_EPS_* constants for opendbc volkswagen/power_test.py, which the EPS test screen draws.
+# usage: meb_eps_fit.py <route or segment range>
 import argparse
-import json
 from collections import defaultdict
 
 import numpy as np
@@ -72,25 +71,23 @@ def segments(rows: np.ndarray) -> dict[int, list[tuple[np.ndarray, np.ndarray]]]
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("route")
-  parser.add_argument("--baseline", help="write the fit here for the onroad EPS test screen")
   args = parser.parse_args()
 
   segs = segments(read(args.route))
   print(f"stock power {STOCK_POWER}%")
   print(f"{'band m/s':>9} {'delay ms':>8} {'tau s':>6} {'gain':>5} {'r2':>5} {'minutes':>7}")
-  baseline = {"v": [], "delay_ms": [], "tau": [], "gain": []}
+  stock: dict[str, list[float]] = defaultdict(list)
   for b, (lo, hi) in enumerate(BANDS):
     # normal driving rarely reaches the EPS rate limit, fit without one
     f = fit(segs.get(b, []), rate=np.inf)
     if f is None:
       continue
     print(f"{lo:4.0f}-{hi:<4.0f} {f['delay_ms']:8.0f} {f['tau']:6.3f} {f['gain']:5.2f} {f['r2']:5.2f} {f['n'] * DT / 60:7.1f}")
-    for k, x in (("v", (lo + hi) / 2), ("delay_ms", f["delay_ms"]), ("tau", f["tau"]), ("gain", f["gain"])):
-      baseline[k].append(round(float(x), 3))
-  if args.baseline and baseline["v"]:
-    with open(args.baseline, "w") as fh:
-      json.dump(baseline, fh)
-    print(f"baseline written to {args.baseline}")
+    for k, x in (("V", (lo + hi) / 2), ("DELAY", f["delay_ms"] / 1000), ("TAU", f["tau"]), ("GAIN", f["gain"])):
+      stock[k].append(round(float(x), 3))
+  print()
+  for k, x in stock.items():
+    print(f"STOCK_EPS_{k} = {tuple(x)}")
 
 
 if __name__ == "__main__":
