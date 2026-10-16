@@ -78,8 +78,8 @@ class EpsTestOverlay(Widget):
 
     fault_now = s["hca_status"] in ("FAULT", "REJECTED", "PREEMPTED", "DISABLED")
     if s["active"]:
-      color = BLUE if s.get("recenter") else GREEN
-      title = "back to line" if s.get("recenter") else s["maneuver"]
+      color = BLUE if s.get("openpilot") else GREEN
+      title = "openpilot" if s.get("openpilot") else s["maneuver"]
     else:
       color = RED if fault_now or s["note"].startswith("EPS") else YELLOW
       title = s["note"] or "waiting"
