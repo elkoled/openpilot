@@ -61,6 +61,8 @@ class TestModelLaneChange:
 
   def test_unclear_lane_or_slow_ignored(self):
     dh = DesireHelper()
+    run(dh, carstate(), model(106.), 3.)
+    assert dh.lane_change_state == LaneChangeState.off
     run(dh, carstate(), model(1.5, prob=0.3), 3.)
     assert dh.lane_change_state == LaneChangeState.off
     run(dh, carstate(v=5.), model(1.5), 3.)

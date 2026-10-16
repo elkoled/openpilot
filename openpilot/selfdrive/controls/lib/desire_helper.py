@@ -15,6 +15,7 @@ LANE_CHANGE_START_TIME = 0.5
 # this far ahead, for this long, with both lane lines clear
 MODEL_LC_LOOKAHEAD = 2.5  # s
 MODEL_LC_OFFSET = 1.0  # m
+MODEL_LC_MAX_OFFSET = 2.5  # m, past this the lane lines and plan don't agree on the frame, ignore it
 MODEL_LC_TIME = 1.0  # s
 MODEL_LC_MIN_PROB = 0.6
 MODEL_LC_LANE_WIDTH = (2.5, 4.8)  # m
@@ -46,7 +47,8 @@ class DesireHelper:
     right = np.interp(x, model.laneLines[2].x, model.laneLines[2].y)
     if not MODEL_LC_LANE_WIDTH[0] < right - left < MODEL_LC_LANE_WIDTH[1]:
       return None
-    return float(np.interp(x, model.position.x, model.position.y) - (left + right) / 2)
+    offset = float(np.interp(x, model.position.x, model.position.y) - (left + right) / 2)
+    return offset if abs(offset) < MODEL_LC_MAX_OFFSET else None
 
   def update_drift(self, model, v_ego: float):
     offset = self.plan_lane_offset(model, v_ego)
