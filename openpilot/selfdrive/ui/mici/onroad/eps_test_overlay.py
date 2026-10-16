@@ -3,6 +3,7 @@ import os
 import time
 from collections import deque
 
+import numpy as np
 import pyray as rl
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -10,9 +11,12 @@ from openpilot.system.ui.widgets import Widget
 
 # local MEB EPS test status, written by the car controller (opendbc volkswagen power_test)
 STATUS_FILE = "/dev/shm/meb_power_test.json"
+# EPS response fitted from normal driving at stock power (tools/lateral_maneuvers/meb_eps_fit.py --baseline)
+BASELINE_FILE = "/data/meb_eps_baseline.json"
 STALE_S = 2.
 READ_EVERY_S = 0.05
 TRACE_LEN = 200  # 4 s at 50 Hz
+DT = 0.02
 
 WHITE = rl.Color(255, 255, 255, 255)
 GREY = rl.Color(255, 255, 255, 140)
@@ -32,6 +36,15 @@ class EpsTestOverlay(Widget):
     self._trace: deque[tuple[float, float]] = deque(maxlen=TRACE_LEN)
     self._font_bold = gui_app.font(FontWeight.BOLD)
     self._font = gui_app.font(FontWeight.MEDIUM)
+    self._baseline = self._load_baseline()
+
+  @staticmethod
+  def _load_baseline() -> dict | None:
+    try:
+      with open(BASELINE_FILE) as f:
+        return json.load(f)
+    except (OSError, ValueError):
+      return None
 
   def visible(self) -> bool:
     self._read()
@@ -90,7 +103,7 @@ class EpsTestOverlay(Widget):
     self._text(title, x0, rect.y + 8, self._fit(title, 40, x1 - x0 - power_w - 20), color, bold=True)
 
     # command vs measured curvature
-    self._plot(rl.Rectangle(x0, rect.y + 60, x1 - x0, 118))
+    self._plot(rl.Rectangle(x0, rect.y + 60, x1 - x0, 118), s["v_ego"])
 
     # speed against the band, bands done, EPS state
     y = rect.y + 186
@@ -118,20 +131,39 @@ class EpsTestOverlay(Widget):
     rl.draw_rectangle_rec(bar, DIM)
     rl.draw_rectangle_rec(rl.Rectangle(bar.x, bar.y, bar.width * s["progress"], bar.height), color)
 
-  def _plot(self, r: rl.Rectangle):
+  def _model(self, cmd: list[float], v_ego: float) -> list[float] | None:
+    # the stock power EPS fitted from driving, run on the same command
+    b = self._baseline
+    if b is None:
+      return None
+    delay = int(round(float(np.interp(v_ego, b["v"], b["delay_ms"])) / 1000 / DT))
+    alpha = 1. - np.exp(-DT / float(np.interp(v_ego, b["v"], b["tau"])))
+    gain = float(np.interp(v_ego, b["v"], b["gain"]))
+    y = [self._trace[0][1]]
+    for k in range(len(cmd) - 1):
+      y.append(y[-1] + alpha * (gain * cmd[max(k - delay, 0)] - y[-1]))
+    return y
+
+  def _plot(self, r: rl.Rectangle, v_ego: float):
     rl.draw_rectangle_rounded_lines_ex(r, 0.08, 6, 1, DIM)
     rl.draw_line_ex(rl.Vector2(r.x, r.y + r.height / 2), rl.Vector2(r.x + r.width, r.y + r.height / 2), 1, DIM)
     if len(self._trace) < 2:
       return
-    scale = max(0.02, max(max(abs(a), abs(b)) for a, b in self._trace)) * 1.1
+    cmd = [p[0] for p in self._trace]
+    lines = [([p[1] for p in self._trace], GREEN), (cmd, WHITE)]
+    model = self._model(cmd, v_ego)
+    if model is not None:
+      lines.insert(0, (model, GREY))
+    scale = max(0.02, max(abs(x) for line, _ in lines for x in line)) * 1.1
     n = len(self._trace)
-    for idx, color in ((1, GREEN), (0, WHITE)):
-      pts = [rl.Vector2(r.x + r.width * (i + TRACE_LEN - n) / (TRACE_LEN - 1), r.y + r.height / 2 * (1 - p[idx] / scale))
-             for i, p in enumerate(self._trace)]
+    for line, color in lines:
+      pts = [rl.Vector2(r.x + r.width * (i + TRACE_LEN - n) / (TRACE_LEN - 1), r.y + r.height / 2 * (1 - x / scale)) for i, x in enumerate(line)]
       for a, b in zip(pts, pts[1:], strict=False):
         rl.draw_line_ex(a, b, 3, color)
-    rl.draw_rectangle_rec(rl.Rectangle(r.x + 2, r.y + 2, 92, 22), rl.BLACK)
+    rl.draw_rectangle_rec(rl.Rectangle(r.x + 2, r.y + 2, 150 if model is not None else 92, 22), rl.BLACK)
     rl.draw_rectangle_rec(rl.Rectangle(r.x + r.width - 92, r.y + 2, 90, 22), rl.BLACK)
     self._text("cmd", r.x + 8, r.y + 4, 18, WHITE, bold=True)
     self._text("eps", r.x + 54, r.y + 4, 18, GREEN, bold=True)
+    if model is not None:
+      self._text("50%", r.x + 96, r.y + 4, 18, GREY, bold=True)
     self._text(f"{scale * 2600:.0f} deg", r.x + r.width - 8, r.y + 4, 18, GREY, bold=True, right=True)
