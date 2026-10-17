@@ -1,12 +1,14 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from opendbc.car.structs import car
 from openpilot.cereal import log
 from openpilot.common.realtime import DT_MDL
-from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper, MODEL_LC_TIME, MODEL_LC_CONFIRM_TIME, MODEL_LC_DECLINED_COOLDOWN, \
-                                                         LaneChangeState, LaneChangeDirection
+from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper, LaneChangeState, LaneChangeDirection, MODEL_LC_TIME, MODEL_LC_CONFIRM_TIME, \
+                                                         MODEL_LC_DECLINED_COOLDOWN, MODEL_LC_LOOKAHEAD, MODEL_LC_HOLD_DEADBAND, MODEL_LC_HOLD_GAIN, \
+                                                         MODEL_LC_HOLD_MAX_ACCEL, MODEL_LC_HOLD_RAMP
 
 X = np.linspace(0., 100., 33)
 
@@ -121,3 +123,27 @@ class TestModelLaneChange:
     assert dh.lane_change_state == LaneChangeState.off
     run(dh, carstate(v=5.), model(1.5), 3.)
     assert dh.lane_change_state == LaneChangeState.off
+
+
+class TestLaneHold:
+  def test_drift_pulled_back_until_signaled(self):
+    dh = DesireHelper()
+    run(dh, carstate(), model(1.5), 1.)
+    x = 25. * MODEL_LC_LOOKAHEAD
+    assert dh.lane_hold_curvature == pytest.approx(-2 * MODEL_LC_HOLD_GAIN * (1.5 - MODEL_LC_HOLD_DEADBAND) / x ** 2)
+    run(dh, carstate(right_blinker=True), model(1.5), 1.)
+    assert dh.lane_hold_curvature == 0.
+
+  def test_in_lane_untouched(self):
+    dh = DesireHelper()
+    run(dh, carstate(), model(MODEL_LC_HOLD_DEADBAND - 0.1), 2.)
+    assert dh.lane_hold_curvature == 0.
+    run(dh, carstate(), model(-1.5, prob=0.3), 2.)
+    assert dh.lane_hold_curvature == 0.
+
+  def test_limited_and_ramped(self):
+    dh = DesireHelper()
+    run(dh, carstate(v=10.), model(4.5), DT_MDL)
+    assert 0. > dh.lane_hold_curvature > -MODEL_LC_HOLD_MAX_ACCEL / 10. ** 2 * MODEL_LC_HOLD_RAMP * DT_MDL * 1.01
+    run(dh, carstate(v=10.), model(4.5), 1.)
+    assert dh.lane_hold_curvature == pytest.approx(-MODEL_LC_HOLD_MAX_ACCEL / 10. ** 2)
