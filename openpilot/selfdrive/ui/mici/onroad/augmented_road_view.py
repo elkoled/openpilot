@@ -230,9 +230,9 @@ class AugmentedRoadView(CameraView):
     # Update calibration before rendering
     self._update_calibration()
 
-    # the arrow view shows lane changes itself
+    # the arrow view shows lane change intent itself, changing lanes stays up until it's done
     nav_view = ui_state.navigation_enabled
-    hidden = {'laneChange', 'preLaneChangeLeft', 'preLaneChangeRight'} if nav_view else set()
+    hidden = {'preLaneChangeLeft', 'preLaneChangeRight'} if nav_view else set()
     self._alert_renderer.hidden_events = self._driver_state_renderer.hidden_events = self._long_indicator.hidden_events = hidden
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
