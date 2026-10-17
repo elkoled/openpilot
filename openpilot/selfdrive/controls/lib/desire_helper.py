@@ -20,6 +20,9 @@ MODEL_LC_TIME = 1.0  # s
 MODEL_LC_MIN_PROB = 0.6
 MODEL_LC_LANE_WIDTH = (2.5, 4.8)  # m
 MODEL_LC_COOLDOWN = 5.  # s after a model lane change before another
+MODEL_LC_CONFIRM_TIME = 8.  # s the driver has to confirm it with the turn signal
+MODEL_LC_LOST_TIME = 1.  # s the model can stop drifting before the request is dropped
+MODEL_LC_DECLINED_COOLDOWN = 15.  # s after an unconfirmed request before asking again
 
 class DesireHelper:
   def __init__(self):
@@ -32,6 +35,7 @@ class DesireHelper:
     self.drift_dir = 0
     self.drift_time = 0.
     self.model_lc_cooldown = 0.
+    self.drift_lost_time = 0.
 
   @staticmethod
   def get_lane_change_direction(CS):
@@ -57,6 +61,32 @@ class DesireHelper:
     self.drift_dir = direction
     self.model_lc_cooldown = max(self.model_lc_cooldown - DT_MDL, 0.)
 
+  def update_lane_change_request(self, carstate, one_blinker: bool, below_lane_change_speed: bool):
+    # the model asked for a lane change, the driver confirms it with the turn signal that way
+    right = self.lane_change_direction == LaneChangeDirection.right
+    blindspot = carstate.rightBlindspot if right else carstate.leftBlindspot
+    if one_blinker:
+      if self.get_lane_change_direction(carstate) != self.lane_change_direction:
+        # signaled the other way, a normal lane change that way
+        self.model_lane_change = False
+        self.lane_change_direction = self.get_lane_change_direction(carstate)
+      elif not blindspot and not below_lane_change_speed:
+        self.lane_change_state = LaneChangeState.laneChangeStarting
+        self.lane_change_timer = 0.0
+      return
+
+    self.lane_change_timer += DT_MDL
+    self.drift_lost_time = 0. if self.drift_dir == (1 if right else -1) else self.drift_lost_time + DT_MDL
+    steered_away = carstate.steeringPressed and (carstate.steeringTorque > 0) == right
+    if (below_lane_change_speed or blindspot or steered_away or self.drift_lost_time > MODEL_LC_LOST_TIME or
+        self.lane_change_timer > MODEL_LC_CONFIRM_TIME):
+      self.lane_change_state = LaneChangeState.off
+      self.lane_change_direction = LaneChangeDirection.none
+      self.lane_change_timer = 0.0
+      self.model_lane_change = False
+      self.model_lc_cooldown = MODEL_LC_DECLINED_COOLDOWN
+      self.drift_time = 0.
+
   def update(self, carstate, lateral_active, lane_change_prob, model=None):
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
@@ -77,14 +107,18 @@ class DesireHelper:
 
       elif (self.lane_change_state == LaneChangeState.off and not one_blinker and not below_lane_change_speed and
             self.drift_time >= MODEL_LC_TIME and self.model_lc_cooldown == 0.):
-        # the model is heading into the next lane, change lanes properly instead, unless that side is occupied
+        # the model is heading into the next lane, ask the driver to confirm a lane change, unless that side is occupied
         direction = LaneChangeDirection.right if self.drift_dir > 0 else LaneChangeDirection.left
         blindspot = carstate.rightBlindspot if self.drift_dir > 0 else carstate.leftBlindspot
         if not blindspot:
-          self.lane_change_state = LaneChangeState.laneChangeStarting
+          self.lane_change_state = LaneChangeState.preLaneChange
           self.lane_change_direction = direction
           self.lane_change_timer = 0.0
           self.model_lane_change = True
+          self.drift_lost_time = 0.
+
+      elif self.lane_change_state == LaneChangeState.preLaneChange and self.model_lane_change:
+        self.update_lane_change_request(carstate, one_blinker, below_lane_change_speed)
 
       elif self.lane_change_state == LaneChangeState.preLaneChange:
         # Update lane change direction
@@ -111,7 +145,7 @@ class DesireHelper:
         if lane_change_prob < 0.02 and self.lane_change_timer >= LANE_CHANGE_START_TIME:
           self.lane_change_timer = 0.0
           if self.model_lane_change:
-            # done, the turn signal was ours
+            # done, wait before the model can ask again
             self.lane_change_state = LaneChangeState.off
             self.lane_change_direction = LaneChangeDirection.none
             self.model_lane_change = False

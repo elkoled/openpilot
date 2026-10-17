@@ -104,8 +104,9 @@ class Controls:
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
 
-    # Enable blinkers while lane changing
-    if model_v2.meta.laneChangeState != LaneChangeState.off:
+    # Enable blinkers while lane changing, not while the model waits for the driver to signal
+    lane_change_request = model_v2.meta.laneChangeState == LaneChangeState.preLaneChange and not (CS.leftBlinker or CS.rightBlinker)
+    if model_v2.meta.laneChangeState != LaneChangeState.off and not lane_change_request:
       CC.leftBlinker = model_v2.meta.laneChangeDirection == LaneChangeDirection.left
       CC.rightBlinker = model_v2.meta.laneChangeDirection == LaneChangeDirection.right
 

@@ -163,13 +163,13 @@ class AlertRenderer(Widget):
     # alert_type format is "EventName/eventType" (e.g., "preLaneChangeLeft/warning")
     event_name = alert.alert_type.split('/')[0] if alert.alert_type else ''
 
-    if event_name == 'preLaneChangeLeft':
+    if event_name in ('preLaneChangeLeft', 'laneChangeConfirmLeft'):
       icon_side = IconSide.left
       txt_icon = self._txt_turn_signal_left
       icon_margin_x = 2
       icon_margin_y = 5
 
-    elif event_name == 'preLaneChangeRight':
+    elif event_name in ('preLaneChangeRight', 'laneChangeConfirmRight'):
       icon_side = IconSide.right
       txt_icon = self._txt_turn_signal_right
       icon_margin_x = 2
@@ -275,9 +275,9 @@ class AlertRenderer(Widget):
     # alert_type format is "EventName/eventType" (e.g., "preLaneChangeLeft/warning")
     event_name = alert.alert_type.split('/')[0] if alert.alert_type else ''
 
-    if event_name == 'preLaneChangeLeft':
+    if event_name in ('preLaneChangeLeft', 'laneChangeConfirmLeft'):
       bg_height = small_alert_height
-    elif event_name == 'preLaneChangeRight':
+    elif event_name in ('preLaneChangeRight', 'laneChangeConfirmRight'):
       bg_height = small_alert_height
     elif event_name == 'laneChange':
       bg_height = small_alert_height

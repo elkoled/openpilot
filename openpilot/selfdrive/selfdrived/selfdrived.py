@@ -313,6 +313,12 @@ class SelfdriveD:
       if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
          (CS.rightBlindspot and direction == LaneChangeDirection.right):
         self.events.add(EventName.laneChangeBlocked)
+      elif not (CS.leftBlinker or CS.rightBlinker):
+        # the model asks for this lane change, the driver confirms it with the turn signal
+        if direction == LaneChangeDirection.left:
+          self.events.add(EventName.laneChangeConfirmLeft)
+        else:
+          self.events.add(EventName.laneChangeConfirmRight)
       else:
         if direction == LaneChangeDirection.left:
           self.events.add(EventName.preLaneChangeLeft)

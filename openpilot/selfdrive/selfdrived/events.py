@@ -600,6 +600,22 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
+  EventName.laneChangeConfirmLeft: {
+    ET.WARNING: Alert(
+      "Signal Left to Confirm Lane Change",
+      "",
+      AlertStatus.userPrompt, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1, creation_delay=.2),
+  },
+
+  EventName.laneChangeConfirmRight: {
+    ET.WARNING: Alert(
+      "Signal Right to Confirm Lane Change",
+      "",
+      AlertStatus.userPrompt, AlertSize.small,
+      Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1, creation_delay=.2),
+  },
+
   EventName.laneChangeBlocked: {
     ET.WARNING: Alert(
       "Car Detected in Blindspot",
@@ -1051,6 +1067,20 @@ if HARDWARE.get_device_type() == 'mici':
         "Confirm Lane Change",
         AlertStatus.normal, AlertSize.mid,
         Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+    },
+    EventName.laneChangeConfirmLeft: {
+      ET.WARNING: Alert(
+        "Signal Left",
+        "Confirm Lane Change",
+        AlertStatus.userPrompt, AlertSize.mid,
+        Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1, creation_delay=.2),
+    },
+    EventName.laneChangeConfirmRight: {
+      ET.WARNING: Alert(
+        "Signal Right",
+        "Confirm Lane Change",
+        AlertStatus.userPrompt, AlertSize.mid,
+        Priority.LOW, VisualAlert.none, AudibleAlert.prompt, .1, creation_delay=.2),
     },
     EventName.laneChangeBlocked: {
       ET.WARNING: Alert(
