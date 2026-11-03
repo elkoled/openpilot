@@ -370,6 +370,7 @@ void pandad_run(Panda *panda) {
   PandaSafety panda_safety(panda);
   bool engaged = false;
   bool is_onroad = false;
+  std::string panda_log;
 
   // Main loop: receive CAN first, then process lower priority panda and peripheral state.
   while (!do_exit && check_connected(panda)) {
@@ -396,11 +397,18 @@ void pandad_run(Panda *panda) {
       send_peripheral_state(panda, &pm);
     }
 
-    // Forward logs from panda to cloudlog if available
-    std::string log = panda->serial_read();
-    if (!log.empty()) {
-      if (log.find("Register 0x") != std::string::npos) {
-        // Log register divergent faults as errors
+    // Forward logs from panda to cloudlog in whole lines, a read can end in the middle of a print
+    panda_log += panda->serial_read();
+    size_t end = panda_log.rfind('\n');
+    if (end == std::string::npos && panda_log.size() > 1024) {
+      end = panda_log.size() - 1;  // more than the panda's whole log buffer without a line end
+    }
+    if (end != std::string::npos) {
+      std::string log = panda_log.substr(0, end + 1);
+      panda_log.erase(0, end + 1);
+      // register divergence and fault telemetry as errors, errorLogMessage is in the qlog
+      if (log.find("Register 0x") != std::string::npos || log.find("Fault") != std::string::npos ||
+          log.find("fault") != std::string::npos || log.find("NMI") != std::string::npos) {
         LOGE("%s", log.c_str());
       } else {
         LOGD("%s", log.c_str());
