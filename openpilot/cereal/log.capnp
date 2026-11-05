@@ -100,6 +100,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     startupNoControl @62;
     startupNoSecOcKey @63;
     startupMaster @64;
+    startupCruiseCanceled @105;
     fcw @65;
     steerSaturated @66;
     belowEngageSpeed @67;
@@ -120,10 +121,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     steerTimeLimit @83;
     vehicleSensorsInvalid @84;
     locationdTemporaryError @85;
-    locationdPermanentError @86;
     paramsdTemporaryError @87;
-    paramsdPermanentError @88;
-    actuatorsApiUnavailable @89;
     espActive @90;
     personalityChanged @91;
     aeb @92;
@@ -139,6 +137,9 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     usbErrorDEPRECATED @78;
     audioFeedbackDEPRECATED @97;
     bigModelReadyDEPRECATED @101;
+    locationdPermanentErrorDEPRECATED @86;
+    paramsdPermanentErrorDEPRECATED @88;
+    actuatorsApiUnavailableDEPRECATED @89;
   }
 }
 
