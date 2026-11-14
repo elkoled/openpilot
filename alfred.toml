@@ -1,5 +1,5 @@
 # a UP's DUT starts each job with an empty /data: these come back from master's last good job, as it left them
-cache = ["/data/scons_cache"]
+cache = ["/data/scons_cache", "/data/tmp/comma_download_cache"]
 
 [env]
 PYTHONPATH = "/data/ci/tree/openpilot"  # the tree
@@ -22,6 +22,14 @@ run = """
 for p in msgq_repo/msgq opendbc_repo/opendbc rednose_repo/rednose teleoprtc_repo/teleoprtc tinygrad_repo/tinygrad; do ln -sfn "$p" "${p#*/}"; done
 tools/op.sh build
 """
+
+[steps.flash-panda]
+name = "Flash panda"
+run = "python3 -c 'from openpilot.selfdrive.pandad.pandad import flash_panda; flash_panda()'"
+
+[steps.safety-replay]
+name = "Safety replay"
+run = "./openpilot/selfdrive/pandad/tests/safety_replay.py"
 
 [steps.flash-chestnut]
 name = "Flash Chestnut"
@@ -116,6 +124,57 @@ uses = "build"
 [[jobs.sensord.steps]]
 name = "Sensord"
 run = "./openpilot/system/sensord/tests/test_sensord.py"
+
+# a tenth of the safety replay routes each, on the up-can stations and any free comma four
+[jobs.safety_replay_0]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "0" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_1]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "1" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_2]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "2" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_3]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "3" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_4]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "4" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_5]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "5" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_6]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "6" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_7]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "7" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_8]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "8" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
+
+[jobs.safety_replay_9]
+runs-on = "up-can"
+env = { NUM_JOBS = "10", JOB_ID = "9" }
+steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
 # a comma four with a Chestnut on its aux port, which runs the big model
 [jobs.chestnut]
