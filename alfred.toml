@@ -126,42 +126,42 @@ name = "Sensord"
 run = "./openpilot/system/sensord/tests/test_sensord.py"
 
 # each job replays an eighth of the routes
-[jobs.safety_replay_0]
+[jobs.safety_0]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "0" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_1]
+[jobs.safety_1]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "1" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_2]
+[jobs.safety_2]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "2" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_3]
+[jobs.safety_3]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "3" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_4]
+[jobs.safety_4]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "4" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_5]
+[jobs.safety_5]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "5" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_6]
+[jobs.safety_6]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "6" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
 
-[jobs.safety_replay_7]
+[jobs.safety_7]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "7" }
 steps = [{ uses = "build" }, { uses = "flash-panda" }, { uses = "safety-replay" }]
