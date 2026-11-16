@@ -9,6 +9,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.tests.routes import routes
 from opendbc.car.tests.test_models import NUM_JOBS, JOB_ID, TestCarModelBase
 from opendbc.safety.tests.libsafety import libsafety_py
+from openpilot.common.utils import retry
 
 SECONDS_PER_ROUTE = 10
 DT = 0.01
@@ -17,6 +18,8 @@ BUSES = 3
 STEADY = 2
 
 
+# a route download can drop mid file
+@retry(attempts=3, delay=10)
 def load(route):
   R = type("R", (TestCarModelBase,), {"test_route": route, "platform": route.car_model})
   car_fw, can_msgs, alpha_long = R.get_testing_data()
