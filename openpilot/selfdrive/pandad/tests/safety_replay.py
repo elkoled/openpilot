@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# replays the test routes into the panda from the rack's UP and compares its safety decisions with libsafety's
+# checks the panda's safety against libsafety on the car test routes
 import os
 import sys
 import time
@@ -34,7 +34,7 @@ def load(route):
 
 
 def without_forwarded_copies(mode, param, frames):
-  # some logs also have the panda's forwarded copy, replaying it would collide with the panda's own forward
+  # drop the panda's forwarded copies in the log, the panda forwards them again
   safety = libsafety_py.libsafety
   assert safety.set_safety_hooks(mode, param) == 0
   out = []
@@ -82,9 +82,9 @@ def within(lo, hi, got):
 
 
 def played(p, up, mode, param, frames):
-  # the safety mode first, it restarts the heartbeat timeout that would turn power save back on
+  # first, it resets the heartbeat timeout that turns power save back on
   p.set_safety_mode(mode, param)
-  # loading the route without a heartbeat puts the panda in power save
+  # the panda went into power save while the route loaded without a heartbeat
   p.set_power_save(0)
   # can_health is per CAN controller, a flipped harness swaps buses 0 and 2
   cans = [2, 1, 0] if p.health()["car_harness_status"] == p.HARNESS_STATUS_FLIPPED else [0, 1, 2]
@@ -95,7 +95,7 @@ def played(p, up, mode, param, frames):
     fd |= {0, 2}
   for b in fd:
     up.set_can_data_speed_kbps(b, 2000)
-  # an empty tail, so the station's loop doesn't start over
+  # pad the end so the UP doesn't loop the route
   up.can_replay(frames + [[]] * int(60 / DT))
   start, checks_invalid = time.monotonic(), False
   while time.monotonic() < start + len(frames) * DT + 1:
@@ -112,7 +112,7 @@ def played(p, up, mode, param, frames):
           "rx_invalid": h["safety_rx_invalid"], "relay_malfunction": bool(h["faults"] & 1), "rx_checks_invalid": checks_invalid,
           "safety": [h["safety_mode"], h["safety_param"]],
           "faults": h["faults"] & ~hs0["faults"] & ~1,
-          # only TX, the queue to the host overflows without pandad
+          # TX only, RX overflows without pandad
           "tx_buffer_overflow": h["tx_buffer_overflow"] - hs0["tx_buffer_overflow"],
           "heartbeat_disabled": h["heartbeat_disabled"], "harness_changed": h["car_harness_status"] != hs0["car_harness_status"],
           # only printed, to debug a failure
@@ -126,7 +126,7 @@ def main():
 
   os.environ["SAFETY_UBSAN_TRAP"] = "1"
   p, up = Panda(), UP.remote()
-  # the station starts with the harness lines floating
+  # the UP starts with the harness lines floating
   up.reset()
   up.set_ignition(True)
 
@@ -143,10 +143,10 @@ def main():
       print(f"{route.route} FAIL, can't load: {type(e).__name__}: {e!r}", flush=True)
       failed.append(route.route)
       continue
-    # the station doesn't control the order of one 10 ms list's frames on different buses
+    # the UP sends a 10 ms step's frames on different buses in any order
     lo, hi = (expected(mode, param, [sorted(f, key=lambda m: m[2] * order) for f in frames]) for order in (1, -1))
     got = played(p, up, mode, param, frames)
-    # forwarding stops at a relay malfunction, when depends on the tick
+    # forwarding stops at a relay malfunction, exactly when depends on the tick
     if lo["relay_malfunction"] or hi["relay_malfunction"]:
       for d in (lo, hi, got):
         del d["fwd"]
@@ -154,7 +154,7 @@ def main():
     exp = lo if lo == hi else {"low": lo, "high": hi}
     dropped = [e - g for e, g in zip(lo["rx"], got["rx"], strict=True)]
     print(f"{route.route} {route.car_model} mode {mode} {'ok' if ok else 'FAIL'} {time.monotonic() - st:.0f}s expected {exp} panda {got}" +
-          (f" station dropped {dropped}" if any(dropped) else ""), flush=True)
+          (f" UP dropped {dropped}" if any(dropped) else ""), flush=True)
     if not ok:
       failed.append(route.route)
 

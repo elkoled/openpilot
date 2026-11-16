@@ -125,7 +125,7 @@ uses = "build"
 name = "Sensord"
 run = "./openpilot/system/sensord/tests/test_sensord.py"
 
-# an eighth of the safety replay routes each, on the up-can stations and any free comma four
+# each job replays an eighth of the routes
 [jobs.safety_replay_0]
 runs-on = "up-can"
 env = { NUM_JOBS = "8", JOB_ID = "0" }
