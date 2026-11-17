@@ -1,41 +1,62 @@
 #!/usr/bin/env python3
 # checks the panda's safety against libsafety on the car test routes
+import hashlib
 import multiprocessing
 import os
+import subprocess
 import sys
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from pathlib import Path
 
-from opendbc.car.car_helpers import interfaces
 from opendbc.car.tests.routes import routes
-from opendbc.car.tests.test_models import NUM_JOBS, JOB_ID, TestCarModelBase
+from opendbc.car.tests.test_models import NUM_JOBS, JOB_ID
 from opendbc.safety.tests.libsafety import libsafety_py
+from opendbc.safety.tests.safety_replay.route_replay import BUSES, DT, load, replay
+from openpilot.common.basedir import BASEDIR
+from openpilot.common.hardware import HARDWARE
 from openpilot.common.utils import retry
 
 SECONDS_PER_ROUTE = 10
-DT = 0.01
-BUSES = 3
 # seconds until the RX checks are compared
 STEADY = 2
+# master's passing runs, restored with the alfred cache
+PASSED = Path("/data/scons_cache/safety_replay")
+# a pass is reused for a day, so the rack itself is still checked daily
+PASS_TTL = 24 * 3600
+BUILD_OUTPUTS = {".so", ".o", ".os", ".a", ".pyc", ".gcno", ".gcda"}
+
+
+def inputs() -> str:
+  # everything the result depends on, except the rack: the firmware, opendbc, the panda library, this test, the OS and its compiler
+  root = Path(BASEDIR)
+  files = sorted((root / "panda/board/obj").glob("*.bin.signed"))
+  for d in ("opendbc_repo/opendbc", "panda/python"):
+    files += sorted(f for f in (root / d).rglob("*") if f.is_file() and f.suffix not in BUILD_OUTPUTS and "__pycache__" not in f.parts)
+  files.append(Path(__file__).resolve())
+  h = hashlib.sha256()
+  for f in files:
+    h.update(str(f.relative_to(root)).encode() + b"\0" + f.read_bytes())
+  h.update(f"{HARDWARE.get_os_version()}".encode() + subprocess.check_output(["cc", "--version"]))
+  h.update(f"{NUM_JOBS} {JOB_ID}".encode())
+  return h.hexdigest()[:16]
+
+
+def passed_age(key: str) -> float | None:
+  try:
+    # wall clock, the pass was written on another DUT
+    age = time.time() - float((PASSED / key).read_text())  # noqa: TID251
+  except (OSError, ValueError):
+    return None
+  return age if age < PASS_TTL else None
 
 
 # a route download can drop mid file
 @retry(attempts=3, delay=10)
-def load(route):
-  R = type("R", (TestCarModelBase,), {"test_route": route, "platform": route.car_model})
-  car_fw, can_msgs, alpha_long = R.get_testing_data(route)
-  CP = interfaces[R.platform].get_params(R.platform, R.fingerprint, car_fw, alpha_long, False, docs=False)
-  cfg = CP.safetyConfigs[-1]
-
-  t0 = can_msgs[0][0]
-  frames = [[] for _ in range(int(SECONDS_PER_ROUTE / DT))]
-  for t, msgs in can_msgs:
-    i = int((t - t0) / 1e9 / DT)
-    if i >= len(frames):
-      break
-    frames[i] += [(m.address, bytes(m.dat), m.src % 4) for m in msgs if m.src < 64 and m.src % 4 < BUSES]
-  return cfg.safetyModel.raw, cfg.safetyParam, frames
+def load_window(route):
+  return load(route, SECONDS_PER_ROUTE)
 
 
 def without_forwarded_copies(mode, param, frames):
@@ -62,30 +83,33 @@ def without_forwarded_copies(mode, param, frames):
 
 
 def expected(mode, param, frames):
-  safety = libsafety_py.libsafety
-  assert safety.set_safety_hooks(mode, param) == 0
-  safety.set_alternative_experience(0)
-  rx, fwd, invalid, checks_invalid = Counter(), Counter(), 0, False
-  for i, frame in enumerate(frames):
-    safety.set_timer(int(i * DT * 1e6))
-    if i % int(1 / DT) == 0:
-      safety.safety_tick()
-      checks_invalid |= i * DT >= STEADY and bool(safety.safety_a.state.safety_rx_checks_invalid)
-    for addr, dat, bus in frame:
-      fwd[bus] += safety.safety_fwd_hook(bus, addr) >= 0
-      invalid += not safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, bus, dat))
+  checks_invalid = []
+
+  def on_tick(i, safety):
+    checks_invalid.append(i * DT >= STEADY and bool(safety.safety_a.state.safety_rx_checks_invalid))
+
+  steps = replay(mode, param, frames, on_tick)
+  rx, fwd, invalid = Counter(), Counter(), 0
+  for frame, (results, _) in zip(frames, steps, strict=True):
+    for (_, _, bus), (valid, destination) in zip(frame, results, strict=True):
       rx[bus] += 1
+      fwd[bus] += destination >= 0
+      invalid += not valid
   return {"rx": [rx[b] for b in range(BUSES)], "fwd": [fwd[b] for b in range(BUSES)], "rx_invalid": invalid,
-          "relay_malfunction": bool(safety.get_relay_malfunction()), "rx_checks_invalid": checks_invalid,
+          "relay_malfunction": bool(libsafety_py.libsafety.get_relay_malfunction()), "rx_checks_invalid": any(checks_invalid),
           "safety": [mode, param], "faults": 0, "tx_buffer_overflow": 0, "heartbeat_disabled": False, "harness_changed": False}
 
 
 def prepare(route):
-  mode, param, frames = load(route)
+  mode, param, frames = load_window(route)
   frames = without_forwarded_copies(mode, param, frames)
   # the UP sends a 10 ms step's frames on different buses in any order
   lo, hi = (expected(mode, param, [sorted(f, key=lambda m: m[2] * order) for f in frames]) for order in (1, -1))
   return mode, param, frames, lo, hi
+
+
+def new_pool():
+  return ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn"))
 
 
 def within(lo, hi, got):
@@ -136,7 +160,19 @@ def played(p, up, mode, param, frames):
 def main():
   from panda import Panda
   from ultimate_provisioning import UP
+  from openpilot.selfdrive.pandad.pandad import flash_panda
 
+  key = inputs()
+  age = passed_age(key)
+  if age is None:
+    print(f"inputs {key} have no master pass in the last {PASS_TTL // 3600} h, replaying", flush=True)
+  elif os.environ.get("SAFETY_REPLAY_FORCE") == "1":
+    print(f"inputs {key} passed on master {age / 3600:.1f} h ago, replaying anyway (SAFETY_REPLAY_FORCE)", flush=True)
+  else:
+    print(f"skipped: master passed these inputs ({key}) {age / 3600:.1f} h ago, same firmware, opendbc, panda library, test and OS")
+    return 0
+
+  flash_panda()
   os.environ["SAFETY_UBSAN_TRAP"] = "1"
   p, up = Panda(), UP.remote()
   # the UP starts with the harness lines floating
@@ -146,19 +182,26 @@ def main():
   names = sys.argv[1:]
   todo = [r for i, r in enumerate(routes) if i % NUM_JOBS == JOB_ID and (not names or r.route in names)]
   failed = []
-  # loads the next route while this one replays
-  pool = ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn"))
+  # prepares the next route while this one replays
+  pool = new_pool()
   loading = pool.submit(prepare, todo[0]) if todo else None
   for n, route in enumerate(todo):
     st = time.monotonic()
-    current = loading
-    loading = pool.submit(prepare, todo[n + 1]) if n + 1 < len(todo) else None
     try:
-      mode, param, frames, lo, hi = current.result()
+      prepared = loading.result()
+    except BrokenProcessPool as e:
+      # a crash in libsafety, like a UBSan trap
+      prepared = e
+      pool = new_pool()
     except Exception as e:
-      print(f"{route.route} FAIL, can't load: {type(e).__name__}: {e!r}", flush=True)
+      prepared = e
+    if n + 1 < len(todo):
+      loading = pool.submit(prepare, todo[n + 1])
+    if isinstance(prepared, Exception):
+      print(f"{route.route} FAIL, can't prepare: {type(prepared).__name__}: {prepared!r}", flush=True)
       failed.append(route.route)
       continue
+    mode, param, frames, lo, hi = prepared
     got = played(p, up, mode, param, frames)
     # forwarding stops at a relay malfunction, exactly when depends on the tick
     if lo["relay_malfunction"] or hi["relay_malfunction"]:
@@ -174,7 +217,11 @@ def main():
 
   pool.shutdown()
   print(f"{len(failed)} failed: {failed}")
-  return int(bool(failed))
+  if failed or names:
+    return int(bool(failed))
+  PASSED.mkdir(parents=True, exist_ok=True)
+  (PASSED / key).write_text(str(time.time()))  # noqa: TID251
+  return 0
 
 
 if __name__ == "__main__":
