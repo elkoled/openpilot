@@ -263,26 +263,19 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
     else:
       messages, config, states = message_diffs(frames, a, b), config_diffs(a, b), state_diffs(a, b)
       if messages or config or states:
-        changed.append([f"\n{model} - {route}"] + messages + config + states)
-        changed_full.append([f"\n{model} - {route}"] + messages + config + state_diffs(a, b, full=True))
+        changed.append((f"{model} - {route}", messages + config + states))
+        changed_full.append((f"{model} - {route}", messages + config + state_diffs(a, b, full=True)))
       else:
         n_passed += 1
 
   from openpilot.common.basedir import BASEDIR
   from openpilot.selfdrive.test.diff_format import format_report
 
-  def fmt(shown, notes):
-    return format_report("Safety replay diff report", "Replays every car test route through this PR's panda safety and compares the behavior to master.",
-                         shown, n_passed, errors, new_cars + notes, n_changed=len(changed))
-
-  (Path(BASEDIR) / "diff_safety_full.txt").write_text(fmt(changed_full, []))
-
+  description = "Replays every car test route through this PR's panda safety and compares the behavior to master."
+  full = format_report("Safety replay diff report", description, changed_full, n_passed, errors, new_cars)
+  (Path(BASEDIR) / "diff_safety_full.txt").write_text(full)
   # the comment shows as many routes as fit, the full report is in the job's artifact
-  n = len(changed)
-  while n and len(fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]], [])) > MAX_REPORT:
-    n -= 1
-  shown = changed if n == len(changed) else changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]]
-  report = fmt(shown, [])
+  report = format_report("Safety replay diff report", description, changed, n_passed, errors, new_cars, max_len=MAX_REPORT)
   print(report)
   (Path(BASEDIR) / "diff_safety.txt").write_text(report)
   return int(bool(changed or errors))

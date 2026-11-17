@@ -69,14 +69,14 @@ def diff_report(replay_diffs, segments) -> None:
 
   changes = []
   for plat, seg, proc, (diffs, ref, new) in with_diffs:
-    lines = [f"\n{plat} - {seg} [{proc}]"]
+    lines = []
     by_field = defaultdict(list)
     for d in diffs:
       by_field[d[0]].append(d)
     for field, fd in sorted(by_field.items()):
       lines.append(f"\n  {field} ({len(fd)} diffs)")
       lines.extend(diff_format(fd, ref, new, field))
-    changes.append(lines)
+    changes.append((f"{plat} - {seg} [{proc}]", lines))
 
   report = format_report("Process replay diff report", "Replays driving segments through this PR and compares the behavior to master.",
                          changes, n_passed, [f"{plat} - {seg} [{proc}]: {err}" for plat, seg, proc, err in errors])
