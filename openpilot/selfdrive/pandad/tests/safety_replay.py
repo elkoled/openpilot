@@ -22,7 +22,7 @@ STEADY = 2
 @retry(attempts=3, delay=10)
 def load(route):
   R = type("R", (TestCarModelBase,), {"test_route": route, "platform": route.car_model})
-  car_fw, can_msgs, alpha_long = R.get_testing_data()
+  car_fw, can_msgs, alpha_long = R.get_testing_data(route)
   CP = interfaces[R.platform].get_params(R.platform, R.fingerprint, car_fw, alpha_long, False, docs=False)
   cfg = CP.safetyConfigs[-1]
 
