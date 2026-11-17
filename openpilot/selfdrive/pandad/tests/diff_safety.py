@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # replays the car test routes through BASE's and this opendbc's safety, reports every changed RX and TX result and safety state value
-#   diff_safety.py [BASE]    BASE defaults to HEAD^, which is master on a PR's merge commit
+#   diff_safety.py [BASE]          BASE defaults to HEAD^, which is master on a PR's merge commit
+#   diff_safety.py check [BASE]    prints changed=true when opendbc differs from BASE's
 import multiprocessing
 import os
 import pickle
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -117,10 +119,16 @@ def state_layout(ffi):
 
 def results_route(args):
   # every message's result (RX valid or TX allowed), where each RX is forwarded, and each safety state field after each step
-  path, out = args
+  path, out, build = args
   with open(path, "rb") as f:
     route, model, mode, param, frames = pickle.load(f)
   from opendbc.safety.tests.libsafety import libsafety_py
+  # a copy of the build is a fresh library, no safety state carries over from another route
+  fd, copy = tempfile.mkstemp(suffix=".so")
+  os.close(fd)
+  shutil.copy(build, copy)
+  libsafety_py.load(copy)
+  os.unlink(copy)
   if libsafety_py.libsafety.set_safety_hooks(mode, param) != 0:
     np.savez(out / path.with_suffix(".npz").name, mode=mode)
     return
@@ -134,9 +142,8 @@ def results_route(args):
   np.savez_compressed(out / path.with_suffix(".npz").name, **arrays)
 
 
-def pool(fresh: bool = False):
-  # fresh: a process per task, so no safety state carries over from another route
-  return ProcessPoolExecutor(os.cpu_count(), mp_context=multiprocessing.get_context("spawn"), max_tasks_per_child=1 if fresh else None)
+def pool():
+  return ProcessPoolExecutor(os.cpu_count(), mp_context=multiprocessing.get_context("spawn"))
 
 
 def value(v):
@@ -212,7 +219,7 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
       else:
         n_passed += 1
 
-  from openpilot.selfdrive.test.process_replay.diff_report import format_report
+  from openpilot.selfdrive.test.diff_format import format_report
   def fmt(shown):
     return format_report("Safety replay diff report",
                          "Replays every car test route through master's and this PR's panda safety and compares each RX and TX result and the safety state.",
@@ -235,8 +242,10 @@ def main() -> int:
   if sys.argv[1:2] == ["results"]:
     dumps, out = Path(sys.argv[2]), Path(sys.argv[3])
     out.mkdir()
-    with pool(fresh=True) as p:
-      list(p.map(results_route, [(d, out) for d in sorted(dumps.glob("*.pkl"))]))
+    from opendbc.safety.tests.libsafety import libsafety_py
+    build = libsafety_py._build_libsafety()
+    with pool() as p:
+      list(p.map(results_route, [(d, out, build) for d in sorted(dumps.glob("*.pkl"))]))
     return 0
 
   from openpilot.common.basedir import BASEDIR
@@ -245,8 +254,13 @@ def main() -> int:
   def git(*args, cwd=root):
     return subprocess.check_output(["git", *args], cwd=cwd, text=True).strip()
 
-  base_ref = sys.argv[1] if len(sys.argv) > 1 else "HEAD^"
-  base, new = git("rev-parse", f"{base_ref}:opendbc_repo"), git("rev-parse", "HEAD:opendbc_repo")
+  check = sys.argv[1:2] == ["check"]
+  base_ref = (sys.argv[2:] if check else sys.argv[1:]) or ["HEAD^"]
+  base, new = git("rev-parse", f"{base_ref[0]}:opendbc_repo"), git("rev-parse", "HEAD:opendbc_repo")
+  # for a GitHub step's outputs
+  if check:
+    print(f"changed={str(base != new).lower()}")
+    return 0
   if base == new:
     print(f"opendbc is unchanged ({new}), nothing to compare")
     return 0
