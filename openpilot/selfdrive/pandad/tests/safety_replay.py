@@ -21,6 +21,8 @@ from openpilot.selfdrive.pandad.tests.safety_diff import BUSES, DT, load, replay
 SECONDS_PER_ROUTE = 10
 # seconds until the RX checks are compared
 STEADY = 2
+# frames the station's CAN lanes can start apart
+SKEW = 3
 # master's passing runs, restored with the alfred cache
 PASSED = Path("/data/scons_cache/safety_replay")
 # a pass is reused for a day, so the rack itself is still checked daily
@@ -104,11 +106,29 @@ def expected(mode, param, frames):
           "safety": [mode, param], "faults": 0, "tx_buffer_overflow": 0, "heartbeat_disabled": False, "harness_changed": False}
 
 
+def skewed(frames, bus, k):
+  # this bus's lane starts k frames later
+  out = [[m for m in f if m[2] != bus] for f in [[]] * SKEW + frames + [[]] * SKEW]
+  for i, f in enumerate(frames):
+    out[SKEW + i + k] += [m for m in f if m[2] == bus]
+  return out
+
+
+def bounds(runs):
+  def pick(fn, vals):
+    if isinstance(vals[0], list):
+      return [pick(fn, list(v)) for v in zip(*vals, strict=True)]
+    return fn(vals)
+  return ({k: pick(min, [r[k] for r in runs]) for k in runs[0]}, {k: pick(max, [r[k] for r in runs]) for k in runs[0]})
+
+
 def prepare(route):
   mode, param, frames = load_window(route)
   frames = without_forwarded_copies(mode, param, frames)
-  # the UP sends a 10 ms step's frames on different buses in any order
-  lo, hi = (expected(mode, param, [sorted(f, key=lambda m: m[2] * order) for f in frames]) for order in (1, -1))
+  # the UP sends a 10 ms step's frames on different buses in any order, and its lanes start up to SKEW frames apart
+  runs = [expected(mode, param, [sorted(f, key=lambda m: m[2] * order) for f in skewed(frames, 2, k)])
+          for order in (1, -1) for k in range(-SKEW, SKEW + 1)]
+  lo, hi = bounds(runs)
   return mode, param, frames, lo, hi
 
 
