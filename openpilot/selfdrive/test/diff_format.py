@@ -11,8 +11,11 @@ def format_report(title: str, description: str, changes: list[tuple[str, list[st
     "Please review any changes carefully to ensure they are expected.\n",
     f"{icon}  {len(changes)} changed, {n_passed} passed, {len(errors)} errors",
   ]
-  lines += [f"\nERROR {e}" for e in errors]
   lines += notes or []
+  if errors:
+    lines.append("<details><summary><b>Show errors</b></summary>\n\n```")
+    lines += [f"\n{e}" for e in dict.fromkeys(errors)]
+    lines.append("```\n</details>")
   if changes:
     lines.append("<details><summary><b>Show changes</b></summary>\n\n```")
     size = sum(len(line) + 1 for line in lines)

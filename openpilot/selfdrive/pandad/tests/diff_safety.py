@@ -288,8 +288,11 @@ def main() -> int:
     out.mkdir()
     from opendbc.safety.tests.libsafety import libsafety_py
     build = libsafety_py._build_libsafety()
-    with pool() as p:
-      list(p.map(results_route, [(d, out, build) for d in sorted(dumps.glob("*.pkl"))]))
+    try:
+      with pool() as p:
+        list(p.map(results_route, [(d, out, build) for d in sorted(dumps.glob("*.pkl"))]))
+    finally:
+      os.unlink(build)
     return 0
 
   from openpilot.common.basedir import BASEDIR
