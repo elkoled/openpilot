@@ -21,7 +21,7 @@ git -C opendbc_repo worktree add -q --detach "$W/base" "$base"
 cp opendbc_repo/opendbc/safety/tests/libsafety/libsafety_py.py "$W/base/opendbc/safety/tests/libsafety/"
 
 REPLAY=opendbc_repo/opendbc/safety/tests/safety_replay/route_replay.py
-python3 $REPLAY dump "$W/routes"
-PYTHONPATH="$W/base" python3 $REPLAY digest "$W/routes" "$W/base.json"
-python3 $REPLAY digest "$W/routes" "$W/new.json"
-python3 $REPLAY compare "$W/base.json" "$W/new.json"
+python3 "$REPLAY" dump "$W/routes"
+PYTHONPATH="$W/base" python3 "$REPLAY" digest "$W/routes" "$W/base.json"
+python3 "$REPLAY" digest "$W/routes" "$W/new.json"
+python3 "$REPLAY" compare "$W/base.json" "$W/new.json"
