@@ -15,6 +15,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[4]
 REPORT = ROOT / "diff_safety.txt"
+# GitHub comments hold 65536 characters, and this shares one with the process replay report
+MAX_REPORT = 50000
 DT = 0.01
 BUSES = 3
 # a TX message's bus, like cereal's can src
@@ -178,11 +180,19 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
         n_passed += 1
 
   from openpilot.selfdrive.test.process_replay.diff_report import format_report
-  report = format_report("Safety replay diff report",
+  def fmt(shown):
+    return format_report("Safety replay diff report",
                          "Replays every car test route through master's and this PR's panda safety and compares each RX and TX result and the safety state.",
-                         changed, n_passed, errors, new_cars)
-  REPORT.write_text(report)
+                         shown, n_passed, errors, new_cars, n_changed=len(changed))
+  report = fmt(changed)
   print(report)
+  # the full report stays in the job log, the comment shows as many routes as fit
+  n = len(changed)
+  while n and len(fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes, see the safety replay job)"]])) > MAX_REPORT:
+    n -= 1
+  if n < len(changed):
+    report = fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes, see the safety replay job)"]])
+  REPORT.write_text(report)
   return int(bool(changed or errors))
 
 

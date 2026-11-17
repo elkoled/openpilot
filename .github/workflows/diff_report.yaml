@@ -72,7 +72,11 @@ jobs:
     # one comment for both reports, the safety one only when this PR changes opendbc
     - name: Combine reports
       if: steps.wait.outcome == 'success'
-      run: cat diff_report.txt diff_safety.txt > comment.md 2>/dev/null; [ -s comment.md ] || rm -f comment.md
+      run: |
+        for f in diff_report.txt diff_safety.txt; do
+          if [ -f "$f" ]; then cat "$f"; printf '\n\n'; fi
+        done > comment.md
+        [ -s comment.md ] || rm -f comment.md
     - name: Comment on PR
       if: steps.wait.outcome == 'success' && hashFiles('comment.md') != ''
       uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b
