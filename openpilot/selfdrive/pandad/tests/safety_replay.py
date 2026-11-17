@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # checks the panda's safety against libsafety on the car test routes
+import multiprocessing
 import os
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor
 
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.tests.routes import routes
@@ -78,6 +80,14 @@ def expected(mode, param, frames):
           "safety": [mode, param], "faults": 0, "tx_buffer_overflow": 0, "heartbeat_disabled": False, "harness_changed": False}
 
 
+def prepare(route):
+  mode, param, frames = load(route)
+  frames = without_forwarded_copies(mode, param, frames)
+  # the UP sends a 10 ms step's frames on different buses in any order
+  lo, hi = (expected(mode, param, [sorted(f, key=lambda m: m[2] * order) for f in frames]) for order in (1, -1))
+  return mode, param, frames, lo, hi
+
+
 def within(lo, hi, got):
   if isinstance(lo, list):
     return all(within(a, b, g) for a, b, g in zip(lo, hi, got, strict=True))
@@ -134,20 +144,21 @@ def main():
   up.set_ignition(True)
 
   names = sys.argv[1:]
+  todo = [r for i, r in enumerate(routes) if i % NUM_JOBS == JOB_ID and (not names or r.route in names)]
   failed = []
-  for i, route in enumerate(routes):
-    if i % NUM_JOBS != JOB_ID or (names and route.route not in names):
-      continue
+  # loads the next route while this one replays
+  pool = ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn"))
+  loading = pool.submit(prepare, todo[0]) if todo else None
+  for n, route in enumerate(todo):
     st = time.monotonic()
+    current = loading
+    loading = pool.submit(prepare, todo[n + 1]) if n + 1 < len(todo) else None
     try:
-      mode, param, frames = load(route)
-      frames = without_forwarded_copies(mode, param, frames)
+      mode, param, frames, lo, hi = current.result()
     except Exception as e:
       print(f"{route.route} FAIL, can't load: {type(e).__name__}: {e!r}", flush=True)
       failed.append(route.route)
       continue
-    # the UP sends a 10 ms step's frames on different buses in any order
-    lo, hi = (expected(mode, param, [sorted(f, key=lambda m: m[2] * order) for f in frames]) for order in (1, -1))
     got = played(p, up, mode, param, frames)
     # forwarding stops at a relay malfunction, exactly when depends on the tick
     if lo["relay_malfunction"] or hi["relay_malfunction"]:
@@ -161,6 +172,7 @@ def main():
     if not ok:
       failed.append(route.route)
 
+  pool.shutdown()
   print(f"{len(failed)} failed: {failed}")
   return int(bool(failed))
 
