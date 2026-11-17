@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-# replays the car test routes through BASE's and this opendbc's safety, reports every changed RX and TX result and safety state value
+# replays the car test routes through BASE's and this opendbc's car code and safety, reports every changed safety mode and param,
+# RX and TX result and safety state value
 #   diff_safety.py [BASE]          BASE defaults to HEAD^, which is master on a PR's merge commit
 #   diff_safety.py check [BASE]    prints changed=true when opendbc differs from BASE's
+import inspect
 import multiprocessing
 import os
-import pickle
+import re
 import shutil
 import subprocess
 import sys
@@ -31,7 +33,8 @@ def load(route, seconds: float | None = None, tx: bool = False):
   from opendbc.car.tests.test_models import TestCarModelBase
 
   R = type("R", (TestCarModelBase,), {"test_route": route, "platform": route.car_model})
-  car_fw, can_msgs, alpha_long = R.get_testing_data(route)
+  # older opendbc reads the route from test_route
+  car_fw, can_msgs, alpha_long = R.get_testing_data(route) if inspect.signature(R.get_testing_data).parameters else R.get_testing_data()
   CP = interfaces[R.platform].get_params(R.platform, R.fingerprint, car_fw, alpha_long, False, docs=False)
   cfg = CP.safetyConfigs[-1]
 
@@ -77,16 +80,6 @@ def replay(mode: int, param: int, frames, on_tick=None):
         results.append((bool(safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, bus, dat))), fwd))
     steps.append((results, state[:]))
   return steps
-
-
-def dump_route(args):
-  i, route, out = args
-  try:
-    with open(out / f"{i}.pkl", "wb") as f:
-      pickle.dump((route.route, str(route.car_model), *load(route, tx=True)), f)
-  except Exception as e:
-    return f"{route.car_model} - {route.route}: can't load, {e!r}"
-  return None
 
 
 def state_layout(ffi):
@@ -142,10 +135,16 @@ def safety_config(ffi, safety) -> tuple[list[str], dict]:
 
 
 def results_route(args):
-  # every message's result (RX valid or TX allowed), where each RX is forwarded, and each safety state field after each step
-  path, out, build = args
-  with open(path, "rb") as f:
-    route, model, mode, param, frames = pickle.load(f)
+  # with this side's car code and safety: the safety mode and param, every message's result (RX valid or TX allowed),
+  # where each RX is forwarded, and each safety state field after each step
+  route, out, build = args
+  name = f"{route.car_model} - {route.route}"
+  path = out / f"{re.sub(r'[^\w.-]', '_', f'{name} {route.segment}')}.npz"
+  try:
+    mode, param, frames = load(route, tx=True)
+  except Exception as e:
+    np.savez(path, name=name, error=f"can't load, {e!r}")
+    return
   from opendbc.safety.tests.libsafety import libsafety_py
   # a copy of the build is a fresh library, no safety state carries over from another route
   fd, copy = tempfile.mkstemp(suffix=".so")
@@ -153,25 +152,28 @@ def results_route(args):
   shutil.copy(build, copy)
   libsafety_py.load(copy)
   os.unlink(copy)
+  arrays: dict[str, Any] = {"name": np.array(name), "config:safety_mode": np.array(mode), "config:safety_param": np.array(param)}
   if libsafety_py.libsafety.set_safety_hooks(mode, param) != 0:
-    np.savez(out / path.with_suffix(".npz").name, mode=mode)
+    np.savez(path, **arrays)
     return
   steps = replay(mode, param, frames)
   results = [r for step_results, _ in steps for r in step_results]
   raw = np.frombuffer(b"".join(state for _, state in steps), dtype=np.uint8).reshape(len(steps), -1)
   rx, config = safety_config(libsafety_py.ffi, libsafety_py.libsafety)
-  arrays: dict[str, Any] = {f"config:{name}": np.array(v) for name, v in config.items()}
-  for name, offset, size, dtype in state_layout(libsafety_py.ffi):
+  arrays |= {f"config:{field}": np.array(v) for field, v in config.items()}
+  for field, offset, size, dtype in state_layout(libsafety_py.ffi):
     # an RX check's status by its message, unused slots left out
-    if name.startswith("rx_status["):
-      i, field = int(name[len("rx_status["):name.index("]")]), name[name.index("]") + 1:]
+    if field.startswith("rx_status["):
+      i, rest = int(field[len("rx_status["):field.index("]")]), field[field.index("]") + 1:]
       if i >= len(rx):
         continue
-      name = f"rx_status[{rx[i]}]{field}"
-    arrays[f"state:{name}"] = raw[:, offset:offset + size].copy().view(dtype)[:, 0]
+      field = f"rx_status[{rx[i]}]{rest}"
+    arrays[f"state:{field}"] = raw[:, offset:offset + size].copy().view(dtype)[:, 0]
+  events = np.array([(i, addr, bus) for i, frame in enumerate(frames) for addr, _, bus in frame], dtype=np.int64).reshape(-1, 3)
+  arrays["frame"], arrays["addr"], arrays["bus"] = events.T
   arrays["ok"] = np.array([r[0] if isinstance(r, tuple) else r for r in results], dtype=bool)
   arrays["fwd"] = np.array([r[1] if isinstance(r, tuple) else -2 for r in results], dtype=np.int16)
-  np.savez_compressed(out / path.with_suffix(".npz").name, **arrays)
+  np.savez_compressed(path, **arrays)
 
 
 def pool():
@@ -182,13 +184,12 @@ def value(v):
   return bool(v) if isinstance(v, np.bool_) else v.item()
 
 
-def message_diffs(frames, a, b) -> list[str]:
+def message_diffs(a, b) -> list[str]:
   # RX valid, RX forward and TX allowed, grouped by message and change
-  events = [(i, addr, bus) for i, frame in enumerate(frames) for addr, _, bus in frame]
   changes = Counter()
   first = {}
   for k in np.flatnonzero((a["ok"] != b["ok"]) | (a["fwd"] != b["fwd"])):
-    i, addr, bus = events[k]
+    i, addr, bus = int(a["frame"][k]), int(a["addr"][k]), int(a["bus"][k])
     if bus >= TX:
       key = (f"TX 0x{addr:x} bus {bus - TX} allowed", bool(a["ok"][k]), bool(b["ok"][k]))
     elif a["ok"][k] != b["ok"][k]:
@@ -250,23 +251,31 @@ def state_diffs(a, b, full: bool = False) -> list[str]:
   return lines
 
 
-def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
-  changed, changed_full, n_passed = [], [], 0
-  for dump in sorted(dumps.glob("*.pkl"), key=lambda p: int(p.stem)):
-    with open(dump, "rb") as f:
-      route, model, mode, _, frames = pickle.load(f)
-    a, b = dict(np.load(base / f"{dump.stem}.npz")), dict(np.load(new / f"{dump.stem}.npz"))
-    if "ok" not in b:
-      errors.append(f"{model} - {route}: this opendbc has no safety mode {mode}")
+def diff_report(base: Path, new: Path) -> int:
+  changed, changed_full, errors, n_passed = [], [], [], 0
+  for key in sorted({p.name for p in base.glob("*.npz")} | {p.name for p in new.glob("*.npz")}):
+    a = dict(np.load(base / key)) if (base / key).exists() else None
+    b = dict(np.load(new / key)) if (new / key).exists() else None
+    name = str(np.load(new / key if b is not None else base / key)["name"])
+    if a is None or b is None:
+      lines = ["", f"  {'new test route' if a is None else 'test route removed'}"]
+      changed.append((name, lines))
+      changed_full.append((name, lines))
+    elif "error" in a or "error" in b:
+      errors += [f"{name}: {side}, {d['error']}" for side, d in (("master", a), ("this PR", b)) if "error" in d]
+    elif "ok" not in b:
+      errors.append(f"{name}: this opendbc has no safety mode {b['config:safety_mode']}")
     elif "ok" not in a:
-      new_mode = (f"{model} - {route}", ["", f"  new safety mode {mode}, master's opendbc doesn't have it"])
-      changed.append(new_mode)
-      changed_full.append(new_mode)
+      lines = ["", f"  new safety mode {b['config:safety_mode']}, master's opendbc doesn't have it"]
+      changed.append((name, lines))
+      changed_full.append((name, lines))
+    elif not all(np.array_equal(a[k], b[k]) for k in ("frame", "addr", "bus")):
+      errors.append(f"{name}: the replayed CAN differs between master and this PR")
     else:
-      messages, config, states = message_diffs(frames, a, b), config_diffs(a, b), state_diffs(a, b)
+      messages, config, states = message_diffs(a, b), config_diffs(a, b), state_diffs(a, b)
       if messages or config or states:
-        changed.append((f"{model} - {route}", messages + config + states))
-        changed_full.append((f"{model} - {route}", messages + config + state_diffs(a, b, full=True)))
+        changed.append((name, messages + config + states))
+        changed_full.append((name, messages + config + state_diffs(a, b, full=True)))
       else:
         n_passed += 1
 
@@ -284,15 +293,16 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
 
 
 def main() -> int:
-  # runs with the base's opendbc, so it only uses libsafety
+  # one side, with its opendbc on PYTHONPATH
   if sys.argv[1:2] == ["results"]:
-    dumps, out = Path(sys.argv[2]), Path(sys.argv[3])
+    out = Path(sys.argv[2])
     out.mkdir()
+    from opendbc.car.tests.routes import routes
     from opendbc.safety.tests.libsafety import libsafety_py
     build = libsafety_py._build_libsafety()
     try:
       with pool() as p:
-        list(p.map(results_route, [(d, out, build) for d in sorted(dumps.glob("*.pkl"))]))
+        list(p.map(results_route, [(r, out, build) for r in routes]))
     finally:
       os.unlink(build)
     return 0
@@ -315,18 +325,14 @@ def main() -> int:
     return 0
   print(f"comparing opendbc {base} -> {new}", flush=True)
 
-  from opendbc.car.tests.routes import routes
   with tempfile.TemporaryDirectory() as tmp:
     w, odbc = Path(tmp), root / "opendbc_repo"
     git("fetch", "-q", "--depth=1", "origin", base, cwd=odbc)
     git("worktree", "add", "-q", "--detach", str(w / "base"), base, cwd=odbc)
     try:
-      (w / "routes").mkdir()
-      with pool() as p:
-        errors = [e for e in p.map(dump_route, [(i, r, w / "routes") for i, r in enumerate(routes)]) if e]
       for name, path in (("base", w / "base"), ("new", odbc)):
-        subprocess.check_call([sys.executable, __file__, "results", w / "routes", w / f"{name}_results"], env={**os.environ, "PYTHONPATH": str(path)})
-      return diff_report(w / "routes", w / "base_results", w / "new_results", errors)
+        subprocess.check_call([sys.executable, __file__, "results", w / f"{name}_results"], env={**os.environ, "PYTHONPATH": str(path)})
+      return diff_report(w / "base_results", w / "new_results")
     finally:
       git("worktree", "remove", "--force", str(w / "base"), cwd=odbc)
 
