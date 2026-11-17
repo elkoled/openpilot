@@ -6,7 +6,6 @@ import json
 import multiprocessing
 import os
 import pickle
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,7 +20,8 @@ TX = 128
 STATE = ("get_controls_allowed", "get_relay_malfunction", "get_gas_pressed_prev", "get_brake_pressed_prev", "get_regen_braking_prev",
          "get_steering_disengage_prev", "get_cruise_engaged_prev", "get_vehicle_moving", "get_acc_main_on", "get_torque_meas_min",
          "get_torque_meas_max", "get_torque_driver_min", "get_torque_driver_max", "get_angle_meas_min", "get_angle_meas_max",
-         "get_curvature_meas_min", "get_curvature_meas_max")
+         "get_curvature_meas_min", "get_curvature_meas_max", "get_vehicle_speed_min", "get_vehicle_speed_max", "get_desired_curvature_last",
+         "get_honda_fwd_brake")
 
 
 def load(route, seconds: float | None = None, tx: bool = False):
@@ -43,7 +43,8 @@ def load(route, seconds: float | None = None, tx: bool = False):
     for m in msgs:
       if m.src < 64 and m.src % 4 < BUSES:
         frames[i].append((m.address, bytes(m.dat), m.src % 4))
-      elif tx and TX <= m.src < TX + 64 and m.src % 4 < BUSES:
+      # sent and blocked TX, so a check that allows more shows up too
+      elif tx and m.src >= TX and m.src % 4 < BUSES:
         frames[i].append((m.address, bytes(m.dat), TX + m.src % 4))
   return cfg.safetyModel.raw, cfg.safetyParam, frames
 
@@ -54,12 +55,14 @@ def replay(mode: int, param: int, frames, on_tick=None):
   safety = libsafety_py.libsafety
   assert safety.set_safety_hooks(mode, param) == 0
   safety.set_alternative_experience(0)
+  # older opendbc names it safety_tick_current_safety_config
+  tick = safety.safety_tick if hasattr(safety, "safety_tick") else safety.safety_tick_current_safety_config
 
   steps = []
   for i, frame in enumerate(frames):
     safety.set_timer(int(i * DT * 1e6))
     if i % int(1 / DT) == 0:
-      safety.safety_tick()
+      tick()
       if on_tick is not None:
         on_tick(i, safety)
     results = []
@@ -77,7 +80,7 @@ def dump_route(args):
   i, route, out = args
   try:
     with open(out / f"{i}.pkl", "wb") as f:
-      pickle.dump((route.route, route.car_model, *load(route, tx=True)), f)
+      pickle.dump((route.route, str(route.car_model), *load(route, tx=True)), f)
   except Exception as e:
     return f"{route.route} can't load: {e!r}"
   return None
@@ -87,13 +90,16 @@ def digest_route(path):
   # per second: a hash of everything, then what to show if it differs: valid RX, allowed TX and each state value, summed
   with open(path, "rb") as f:
     route, model, mode, param, frames = pickle.load(f)
+  from opendbc.safety.tests.libsafety import libsafety_py
+  if libsafety_py.libsafety.set_safety_hooks(mode, param) != 0:
+    return route, {"model": model, "seconds": None}
   steps = replay(mode, param, frames)
   seconds = []
   for s in range(0, len(steps), int(1 / DT)):
     chunk = steps[s:s + int(1 / DT)]
     results = [r for step_results, _ in chunk for r in step_results]
     sums = [sum(r[0] for r in results if isinstance(r, tuple)), sum(r for r in results if not isinstance(r, tuple)),
-            *(int(sum(v)) for v in zip(*(state for _, state in chunk), strict=True))]
+            *(sum(v) for v in zip(*(state for _, state in chunk), strict=True))]
     seconds.append((hashlib.sha256(repr(chunk).encode()).hexdigest(), sums))
   return route, {"model": model, "seconds": seconds}
 
@@ -107,12 +113,19 @@ def compare(base: dict, new: dict) -> int:
   diff = []
   for route in sorted(base):
     a, b = base[route], new[route]
+    if b["seconds"] is None:
+      diff.append(route)
+      print(f"{route} {a['model']}: this opendbc doesn't support its safety mode")
+      continue
+    if a["seconds"] is None:
+      print(f"{route} {a['model']}: new, the base opendbc doesn't support its safety mode")
+      continue
     changed = [s for s, (x, y) in enumerate(zip(a["seconds"], b["seconds"], strict=True)) if x[0] != y[0]]
     if changed:
       what = sorted({fields[k] for s in changed for k, (x, y) in enumerate(zip(a["seconds"][s][1], b["seconds"][s][1], strict=True)) if x != y})
       diff.append(route)
       print(f"{route} {a['model']}: differs from {changed[0]} s on, in {len(changed)} of {len(a['seconds'])} s: {', '.join(what) or 'order only'}")
-  print(f"{len(base)} routes, {sum(len(r['seconds']) for r in base.values())} s: " + (f"{len(diff)} routes differ" if diff else "no difference"))
+  print(f"{len(base)} routes, {sum(len(r['seconds'] or []) for r in new.values())} s: " + (f"{len(diff)} routes differ" if diff else "no difference"))
   return int(bool(diff))
 
 
@@ -140,12 +153,12 @@ def main() -> int:
     git("fetch", "-q", "--depth=1", "origin", base, cwd=odbc)
     git("worktree", "add", "-q", "--detach", str(w / "base"), base, cwd=odbc)
     try:
-      # the base's safety code, built like this opendbc builds libsafety
-      shutil.copy(odbc / "opendbc/safety/tests/libsafety/libsafety_py.py", w / "base/opendbc/safety/tests/libsafety/")
       (w / "routes").mkdir()
       with pool() as p:
-        for e in filter(None, p.map(dump_route, [(i, r, w / "routes") for i, r in enumerate(routes)])):
-          print(e)
+        errors = [e for e in p.map(dump_route, [(i, r, w / "routes") for i, r in enumerate(routes)]) if e]
+      if errors:
+        print("\n".join(errors))
+        return 1
       for name, path in (("base", w / "base"), ("new", odbc)):
         subprocess.check_call([sys.executable, __file__, "digest", w / "routes", w / f"{name}.json"], env={**os.environ, "PYTHONPATH": str(path)})
       return compare(json.loads((w / "base.json").read_text()), json.loads((w / "new.json").read_text()))

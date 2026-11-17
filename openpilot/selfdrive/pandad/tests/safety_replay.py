@@ -16,7 +16,6 @@ from opendbc.car.tests.test_models import NUM_JOBS, JOB_ID
 from opendbc.safety.tests.libsafety import libsafety_py
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.hardware import HARDWARE
-from openpilot.common.utils import retry
 from openpilot.selfdrive.pandad.tests.safety_diff import BUSES, DT, load, replay
 
 SECONDS_PER_ROUTE = 10
@@ -35,7 +34,7 @@ def inputs() -> str:
   files = sorted((root / "panda/board/obj").glob("*.bin.signed"))
   for d in ("opendbc_repo/opendbc", "panda/python"):
     files += sorted(f for f in (root / d).rglob("*") if f.is_file() and f.suffix not in BUILD_OUTPUTS and "__pycache__" not in f.parts)
-  files.append(Path(__file__).resolve())
+  files += [Path(__file__).resolve(), Path(__file__).with_name("safety_diff.py").resolve(), root / "openpilot/selfdrive/pandad/pandad.py"]
   h = hashlib.sha256()
   for f in files:
     h.update(str(f.relative_to(root)).encode() + b"\0" + f.read_bytes())
@@ -50,13 +49,18 @@ def passed_age(key: str) -> float | None:
     age = time.time() - float((PASSED / key).read_text())  # noqa: TID251
   except (OSError, ValueError):
     return None
-  return age if age < PASS_TTL else None
+  return age if 0 <= age < PASS_TTL else None
 
 
-# a route download can drop mid file
-@retry(attempts=3, delay=10)
 def load_window(route):
-  return load(route, SECONDS_PER_ROUTE)
+  # a route download can drop mid file
+  for attempt in range(3):
+    try:
+      return load(route, SECONDS_PER_ROUTE)
+    except Exception:
+      if attempt == 2:
+        raise
+      time.sleep(10)
 
 
 def without_forwarded_copies(mode, param, frames):
