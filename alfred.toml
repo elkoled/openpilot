@@ -23,6 +23,10 @@ for p in msgq_repo/msgq opendbc_repo/opendbc rednose_repo/rednose teleoprtc_repo
 tools/op.sh build
 """
 
+[steps.safety-replay]
+name = "Safety replay"
+run = "./openpilot/selfdrive/pandad/tests/safety_replay.py"
+
 [steps.flash-chestnut]
 name = "Flash Chestnut"
 run = "sudo python3 openpilot/system/hardware/chestnut/flash.py"
@@ -116,6 +120,55 @@ uses = "build"
 [[jobs.sensord.steps]]
 name = "Sensord"
 run = "./openpilot/system/sensord/tests/test_sensord.py"
+
+# each job replays an eighth of the routes, unless master passed the same inputs in the last day
+[jobs.safety_0]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "0" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_1]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "1" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_2]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "2" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_3]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "3" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_4]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "4" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_5]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "5" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_6]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "6" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
+
+[jobs.safety_7]
+runs-on = "up-can"
+timeout-minutes = 25
+env = { NUM_JOBS = "8", JOB_ID = "7" }
+steps = [{ uses = "build" }, { uses = "safety-replay" }]
 
 # a comma four with a Chestnut on its aux port, which runs the big model
 [jobs.chestnut]

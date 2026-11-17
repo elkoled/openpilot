@@ -180,8 +180,9 @@ class StateWrap:
     return self._d
 
 
-def state_diffs(a, b) -> list[str]:
-  from opendbc.car.tests.car_diff import format_diff
+def state_diffs(a, b, full: bool = False) -> list[str]:
+  # full: every changed frame instead of the first ones, for the report in the artifact
+  from opendbc.car.tests.car_diff import format_diff, format_numeric_diffs
   lines = []
   for key in sorted(a.keys() | b.keys()):
     if not key.startswith("state:"):
@@ -198,12 +199,16 @@ def state_diffs(a, b) -> list[str]:
     ref = [(int(i * DT * 1e9), StateWrap(name, value(v))) for i, v in enumerate(old)]
     states = [StateWrap(name, value(v)) for v in new]
     lines.append(f"\n  {name} ({len(diffs)} diffs)")
-    lines += format_diff(diffs, ref, states, name)
+    if full and not isinstance(diffs[0][2][0], bool):
+      for i in range(0, len(diffs), 10):
+        lines += format_numeric_diffs(diffs[i:i + 10])
+    else:
+      lines += format_diff(diffs, ref, states, name)
   return lines
 
 
 def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
-  changed, new_cars, n_passed = [], [], 0
+  changed, changed_full, new_cars, n_passed = [], [], [], 0
   for dump in sorted(dumps.glob("*.pkl"), key=lambda p: int(p.stem)):
     with open(dump, "rb") as f:
       route, model, mode, _, frames = pickle.load(f)
@@ -213,26 +218,33 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
     elif "ok" not in a:
       new_cars.append(f"\nNEW {model} - {route}: master's opendbc has no safety mode {mode}")
     else:
-      lines = message_diffs(frames, a, b) + state_diffs(a, b)
-      if lines:
-        changed.append([f"\n{model} - {route}"] + lines)
+      messages, states = message_diffs(frames, a, b), state_diffs(a, b)
+      if messages or states:
+        changed.append([f"\n{model} - {route}"] + messages + states)
+        changed_full.append([f"\n{model} - {route}"] + messages + state_diffs(a, b, full=True))
       else:
         n_passed += 1
 
-  from openpilot.selfdrive.test.diff_format import format_report
-  def fmt(shown):
-    return format_report("Safety replay diff report",
-                         "Replays every car test route through master's and this PR's panda safety and compares each RX and TX result and the safety state.",
-                         shown, n_passed, errors, new_cars, n_changed=len(changed))
-  report = fmt(changed)
-  print(report)
-  # the full report stays in the job log, the comment shows as many routes as fit
-  n = len(changed)
-  while n and len(fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes, see the safety replay job)"]])) > MAX_REPORT:
-    n -= 1
-  if n < len(changed):
-    report = fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes, see the safety replay job)"]])
   from openpilot.common.basedir import BASEDIR
+  from openpilot.selfdrive.test.diff_format import format_report
+
+  def fmt(shown, notes):
+    return format_report("Safety replay diff report", "Replays every car test route through this PR's panda safety and compares the behavior to master.",
+                         shown, n_passed, errors, new_cars + notes, n_changed=len(changed))
+
+  (Path(BASEDIR) / "diff_safety_full.txt").write_text(fmt(changed_full, []))
+
+  # the comment shows as many routes as fit, the full report is in the job's artifact
+  notes = []
+  if changed and "GITHUB_RUN_ID" in os.environ:
+    run = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    notes.append(f"\nEvery changed frame: diff_safety_full.txt in {run}")
+  n = len(changed)
+  while n and len(fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]], notes)) > MAX_REPORT:
+    n -= 1
+  shown = changed if n == len(changed) else changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]]
+  report = fmt(shown, notes)
+  print(report)
   (Path(BASEDIR) / "diff_safety.txt").write_text(report)
   return int(bool(changed or errors))
 
