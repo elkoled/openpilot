@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # checks the panda's safety against libsafety on the car test routes
 import hashlib
+import re
 import multiprocessing
 import os
 import subprocess
 import sys
 import time
+import tomllib
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
@@ -23,26 +25,22 @@ SECONDS_PER_ROUTE = 10
 STEADY = 2
 # frames the station's CAN lanes can start apart
 SKEW = 3
-# master's passing runs, restored with the alfred cache
-PASSED = Path("/data/scons_cache/safety_replay")
+# master's passing runs go in alfred's first cache dir, which jobs get back from master's last good job
+PASSED = Path(tomllib.loads((Path(BASEDIR) / "alfred.toml").read_text())["cache"][0]) / "safety_replay"
 # a pass is reused for a day, so the rack itself is still checked daily
 PASS_TTL = 24 * 3600
-BUILD_OUTPUTS = {".so", ".o", ".os", ".a", ".pyc", ".gcno", ".gcda"}
 
 
 def inputs() -> str:
-  # everything the result depends on, except the rack: the firmware, opendbc, the panda library, this test, the OS and its compiler
-  root = Path(BASEDIR)
-  files = sorted((root / "panda/board/obj").glob("*.bin.signed"))
-  for d in ("opendbc_repo/opendbc", "panda/python"):
-    files += sorted(f for f in (root / d).rglob("*") if f.is_file() and f.suffix not in BUILD_OUTPUTS and "__pycache__" not in f.parts)
-  files += [Path(__file__).resolve(), Path(__file__).with_name("diff_safety.py").resolve(), root / "openpilot/selfdrive/pandad/pandad.py"]
-  h = hashlib.sha256()
-  for f in files:
-    h.update(str(f.relative_to(root)).encode() + b"\0" + f.read_bytes())
-  h.update(f"{HARDWARE.get_os_version()}".encode() + subprocess.check_output(["cc", "--version"]))
-  h.update(f"{NUM_JOBS} {JOB_ID}".encode())
-  return h.hexdigest()[:16]
+  # everything the result depends on, except the rack: git's ids of opendbc, panda and this test's dir, and the OS that builds them
+  ids = subprocess.check_output(["git", "rev-parse", "HEAD:opendbc_repo", "HEAD:panda", "HEAD:openpilot/selfdrive/pandad"], cwd=BASEDIR, text=True)
+  return hashlib.sha256(f"{ids} {HARDWARE.get_os_version()} {NUM_JOBS} {JOB_ID}".encode()).hexdigest()[:16]
+
+
+def relay_malfunction_fault() -> int:
+  # the fault bit as the panda firmware defines it
+  sys_h = (Path(BASEDIR) / "panda/board/sys/sys.h").read_text()
+  return 1 << int(re.search(r"#define FAULT_RELAY_MALFUNCTION\s+\(1UL << (\d+)\)", sys_h).group(1))
 
 
 def passed_age(key: str) -> float | None:
@@ -155,7 +153,7 @@ def played(p, up, mode, param, frames):
   if fd & {0, 2}:
     fd |= {0, 2}
   for b in fd:
-    up.set_can_data_speed_kbps(b, 2000)
+    up.set_can_data_speed_kbps(b, h0[b]["can_data_speed"])
   # pad the end so the UP doesn't loop the route
   up.can_replay(frames + [[]] * int(60 / DT))
   start, checks_invalid = time.monotonic(), False
@@ -166,13 +164,14 @@ def played(p, up, mode, param, frames):
       checks_invalid |= p.health()["safety_rx_checks_invalid"]
     time.sleep(0.2)
   h, h1 = p.health(), [p.can_health(c) for c in cans]
+  relay = relay_malfunction_fault()
   up.reset()
   up.set_ignition(True)
   return {"rx": [h1[b]["total_rx_cnt"] - h0[b]["total_rx_cnt"] for b in range(BUSES)],
           "fwd": [h1[b]["total_fwd_cnt"] - h0[b]["total_fwd_cnt"] for b in range(BUSES)],
-          "rx_invalid": h["safety_rx_invalid"], "relay_malfunction": bool(h["faults"] & 1), "rx_checks_invalid": checks_invalid,
+          "rx_invalid": h["safety_rx_invalid"], "relay_malfunction": bool(h["faults"] & relay), "rx_checks_invalid": checks_invalid,
           "safety": [h["safety_mode"], h["safety_param"]],
-          "faults": h["faults"] & ~hs0["faults"] & ~1,
+          "faults": h["faults"] & ~hs0["faults"] & ~relay,
           # TX only, RX overflows without pandad
           "tx_buffer_overflow": h["tx_buffer_overflow"] - hs0["tx_buffer_overflow"],
           "heartbeat_disabled": h["heartbeat_disabled"], "harness_changed": h["car_harness_status"] != hs0["car_harness_status"],

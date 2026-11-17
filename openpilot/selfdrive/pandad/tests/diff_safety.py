@@ -14,15 +14,14 @@ from typing import Any
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[4]
-REPORT = ROOT / "diff_safety.txt"
+from opendbc.car import DT_CTRL as DT
+
 # GitHub comments hold 65536 characters, and this shares one with the process replay report
 MAX_REPORT = 50000
-DT = 0.01
+# the panda's CAN buses, a log's can src is bus + 4 * panda
 BUSES = 3
-# a TX message's bus, like cereal's can src
+# the panda marks sent CAN with src + 128 and blocked with src + 192
 TX = 128
-
 
 
 def load(route, seconds: float | None = None, tx: bool = False):
@@ -42,7 +41,7 @@ def load(route, seconds: float | None = None, tx: bool = False):
     if i >= len(frames):
       break
     for m in msgs:
-      if m.src < 64 and m.src % 4 < BUSES:
+      if m.src < TX and m.src % 4 < BUSES:
         frames[i].append((m.address, bytes(m.dat), m.src % 4))
       # sent and blocked TX, so a check that allows more shows up too
       elif tx and m.src >= TX and m.src % 4 < BUSES:
@@ -101,7 +100,15 @@ def state_layout(ffi):
         walk(t.item, f"{path}[{i}]", offset + i * ffi.sizeof(t.item))
     elif t.kind in ("primitive", "enum"):
       size = ffi.sizeof(t)
-      dtype = "?" if t.cname == "_Bool" else f"f{size}" if t.cname in ("float", "double") else f"u{size}" if t.cname.startswith("u") else f"i{size}"
+      if t.cname == "_Bool":
+        dtype = "?"
+      else:
+        # cffi only converts float types with float()
+        try:
+          float(ffi.cast(t, 0))
+          dtype = f"f{size}"
+        except TypeError:
+          dtype = f"i{size}" if int(ffi.cast(t, -1)) < 0 else f"u{size}"
       fields.append((path.removeprefix("state."), offset, size, dtype))
 
   walk(ffi.typeof("SafetyCopy"), "", 0)
@@ -218,7 +225,8 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
     n -= 1
   if n < len(changed):
     report = fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes, see the safety replay job)"]])
-  REPORT.write_text(report)
+  from openpilot.common.basedir import BASEDIR
+  (Path(BASEDIR) / "diff_safety.txt").write_text(report)
   return int(bool(changed or errors))
 
 
@@ -231,7 +239,10 @@ def main() -> int:
       list(p.map(results_route, [(d, out) for d in sorted(dumps.glob("*.pkl"))]))
     return 0
 
-  def git(*args, cwd=ROOT):
+  from openpilot.common.basedir import BASEDIR
+  root = Path(BASEDIR)
+
+  def git(*args, cwd=root):
     return subprocess.check_output(["git", *args], cwd=cwd, text=True).strip()
 
   base_ref = sys.argv[1] if len(sys.argv) > 1 else "HEAD^"
@@ -243,7 +254,7 @@ def main() -> int:
 
   from opendbc.car.tests.routes import routes
   with tempfile.TemporaryDirectory() as tmp:
-    w, odbc = Path(tmp), ROOT / "opendbc_repo"
+    w, odbc = Path(tmp), root / "opendbc_repo"
     git("fetch", "-q", "--depth=1", "origin", base, cwd=odbc)
     git("worktree", "add", "-q", "--detach", str(w / "base"), base, cwd=odbc)
     try:
