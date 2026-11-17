@@ -10,6 +10,7 @@ import tempfile
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -21,13 +22,7 @@ DT = 0.01
 BUSES = 3
 # a TX message's bus, like cereal's can src
 TX = 128
-STATE = ("get_controls_allowed", "get_relay_malfunction", "get_gas_pressed_prev", "get_brake_pressed_prev", "get_regen_braking_prev",
-         "get_steering_disengage_prev", "get_cruise_engaged_prev", "get_vehicle_moving", "get_acc_main_on", "get_torque_meas_min",
-         "get_torque_meas_max", "get_torque_driver_min", "get_torque_driver_max", "get_angle_meas_min", "get_angle_meas_max",
-         "get_curvature_meas_min", "get_curvature_meas_max", "get_vehicle_speed_min", "get_vehicle_speed_max", "get_desired_curvature_last",
-         "get_honda_fwd_brake")
-BOOL_STATE = {"controls_allowed", "relay_malfunction", "gas_pressed_prev", "brake_pressed_prev", "regen_braking_prev", "steering_disengage_prev",
-              "cruise_engaged_prev", "vehicle_moving", "acc_main_on", "honda_fwd_brake"}
+
 
 
 def load(route, seconds: float | None = None, tx: bool = False):
@@ -56,13 +51,14 @@ def load(route, seconds: float | None = None, tx: bool = False):
 
 
 def replay(mode: int, param: int, frames, on_tick=None):
-  # the result of each message and the safety state after each 10 ms step
+  # the result of each message and the whole safety state (safety_a) after each 10 ms step
   from opendbc.safety.tests.libsafety import libsafety_py
   safety = libsafety_py.libsafety
   assert safety.set_safety_hooks(mode, param) == 0
   safety.set_alternative_experience(0)
   # older opendbc names it safety_tick_current_safety_config
   tick = safety.safety_tick if hasattr(safety, "safety_tick") else safety.safety_tick_current_safety_config
+  state = libsafety_py.ffi.buffer(libsafety_py.ffi.addressof(safety, "safety_a"))
 
   steps = []
   for i, frame in enumerate(frames):
@@ -78,7 +74,7 @@ def replay(mode: int, param: int, frames, on_tick=None):
       else:
         fwd = safety.safety_fwd_hook(bus, addr)
         results.append((bool(safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, bus, dat))), fwd))
-    steps.append((results, tuple(getattr(safety, g)() for g in STATE)))
+    steps.append((results, state[:]))
   return steps
 
 
@@ -92,8 +88,28 @@ def dump_route(args):
   return None
 
 
+def state_layout(ffi):
+  # every field of the safety state with its offset and type, pointers left out since they differ between processes
+  fields = []
+
+  def walk(t, path, offset):
+    if t.kind == "struct":
+      for name, f in t.fields:
+        walk(f.type, f"{path}.{name}" if path else name, offset + f.offset)
+    elif t.kind == "array":
+      for i in range(t.length):
+        walk(t.item, f"{path}[{i}]", offset + i * ffi.sizeof(t.item))
+    elif t.kind in ("primitive", "enum"):
+      size = ffi.sizeof(t)
+      dtype = "?" if t.cname == "_Bool" else f"f{size}" if t.cname in ("float", "double") else f"u{size}" if t.cname.startswith("u") else f"i{size}"
+      fields.append((path.removeprefix("state."), offset, size, dtype))
+
+  walk(ffi.typeof("SafetyCopy"), "", 0)
+  return fields
+
+
 def results_route(args):
-  # every message's result (RX valid or TX allowed), where each RX is forwarded, and the state after each step
+  # every message's result (RX valid or TX allowed), where each RX is forwarded, and each safety state field after each step
   path, out = args
   with open(path, "rb") as f:
     route, model, mode, param, frames = pickle.load(f)
@@ -103,20 +119,21 @@ def results_route(args):
     return
   steps = replay(mode, param, frames)
   results = [r for step_results, _ in steps for r in step_results]
-  np.savez(out / path.with_suffix(".npz").name,
-           ok=np.array([r[0] if isinstance(r, tuple) else r for r in results], dtype=bool),
-           fwd=np.array([r[1] if isinstance(r, tuple) else -2 for r in results], dtype=np.int16),
-           state=np.array([state for _, state in steps], dtype=np.float64))
+  raw = np.frombuffer(b"".join(state for _, state in steps), dtype=np.uint8).reshape(len(steps), -1)
+  arrays: dict[str, Any] = {f"state:{name}": raw[:, offset:offset + size].copy().view(dtype)[:, 0]
+                            for name, offset, size, dtype in state_layout(libsafety_py.ffi)}
+  arrays["ok"] = np.array([r[0] if isinstance(r, tuple) else r for r in results], dtype=bool)
+  arrays["fwd"] = np.array([r[1] if isinstance(r, tuple) else -2 for r in results], dtype=np.int16)
+  np.savez_compressed(out / path.with_suffix(".npz").name, **arrays)
 
 
-def pool():
-  return ProcessPoolExecutor(os.cpu_count(), mp_context=multiprocessing.get_context("spawn"))
+def pool(fresh: bool = False):
+  # fresh: a process per task, so no safety state carries over from another route
+  return ProcessPoolExecutor(os.cpu_count(), mp_context=multiprocessing.get_context("spawn"), max_tasks_per_child=1 if fresh else None)
 
 
-def value(v: float, name: str):
-  if name in BOOL_STATE:
-    return bool(v)
-  return int(v) if v == int(v) else round(v, 3)
+def value(v):
+  return bool(v) if isinstance(v, np.bool_) else v.item()
 
 
 def message_diffs(frames, a, b) -> list[str]:
@@ -138,9 +155,13 @@ def message_diffs(frames, a, b) -> list[str]:
 
 
 class StateWrap:
-  """Adapter so car_diff reads one safety state value"""
+  """Adapter so car_diff reads one safety state field, dotted names are nested like in a struct"""
   def __init__(self, name: str, v):
-    self._d = {name: v}
+    *parents, leaf = name.split(".")
+    self._d = d = {}
+    for p in parents:
+      d = d.setdefault(p, {})
+    d[leaf] = v
   def to_dict(self) -> dict:
     return self._d
 
@@ -148,15 +169,20 @@ class StateWrap:
 def state_diffs(a, b) -> list[str]:
   from opendbc.car.tests.car_diff import format_diff
   lines = []
-  for k, getter in enumerate(STATE):
-    name = getter.removeprefix("get_")
-    old, new = a["state"][:, k], b["state"][:, k]
+  for key in sorted(a.keys() | b.keys()):
+    if not key.startswith("state:"):
+      continue
+    name = key.removeprefix("state:")
+    if key not in a or key not in b:
+      lines.append(f"\n  {name}: only in {'master' if key in a else 'this PR'}")
+      continue
+    old, new = a[key], b[key]
     frames = np.flatnonzero(old != new)
     if not len(frames):
       continue
-    diffs = [(name, int(i), (value(old[i], name), value(new[i], name)), int(i * DT * 1e9)) for i in frames]
-    ref = [(int(i * DT * 1e9), StateWrap(name, value(v, name))) for i, v in enumerate(old)]
-    states = [StateWrap(name, value(v, name)) for v in new]
+    diffs = [(name, int(i), (value(old[i]), value(new[i])), int(i * DT * 1e9)) for i in frames]
+    ref = [(int(i * DT * 1e9), StateWrap(name, value(v))) for i, v in enumerate(old)]
+    states = [StateWrap(name, value(v)) for v in new]
     lines.append(f"\n  {name} ({len(diffs)} diffs)")
     lines += format_diff(diffs, ref, states, name)
   return lines
@@ -167,7 +193,7 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
   for dump in sorted(dumps.glob("*.pkl"), key=lambda p: int(p.stem)):
     with open(dump, "rb") as f:
       route, model, mode, _, frames = pickle.load(f)
-    a, b = np.load(base / f"{dump.stem}.npz"), np.load(new / f"{dump.stem}.npz")
+    a, b = dict(np.load(base / f"{dump.stem}.npz")), dict(np.load(new / f"{dump.stem}.npz"))
     if "ok" not in b:
       errors.append(f"{model} - {route}: this opendbc has no safety mode {mode}")
     elif "ok" not in a:
@@ -201,7 +227,7 @@ def main() -> int:
   if sys.argv[1:2] == ["results"]:
     dumps, out = Path(sys.argv[2]), Path(sys.argv[3])
     out.mkdir()
-    with pool() as p:
+    with pool(fresh=True) as p:
       list(p.map(results_route, [(d, out) for d in sorted(dumps.glob("*.pkl"))]))
     return 0
 
