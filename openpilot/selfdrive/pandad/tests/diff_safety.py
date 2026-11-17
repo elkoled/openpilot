@@ -26,7 +26,6 @@ STATE = ("get_controls_allowed", "get_relay_malfunction", "get_gas_pressed_prev"
          "get_honda_fwd_brake")
 BOOL_STATE = {"controls_allowed", "relay_malfunction", "gas_pressed_prev", "brake_pressed_prev", "regen_braking_prev", "steering_disengage_prev",
               "cruise_engaged_prev", "vehicle_moving", "acc_main_on", "honda_fwd_brake"}
-MAX_GROUPS = 3
 
 
 def load(route, seconds: float | None = None, tx: bool = False):
@@ -136,8 +135,16 @@ def message_diffs(frames, a, b) -> list[str]:
   return [f"\n  {what}: {old} -> {new} ({n} msgs, from frame {first[(what, old, new)]})" for (what, old, new), n in sorted(changes.items())]
 
 
+class StateWrap:
+  """Adapter so car_diff reads one safety state value"""
+  def __init__(self, name: str, v):
+    self._d = {name: v}
+  def to_dict(self) -> dict:
+    return self._d
+
+
 def state_diffs(a, b) -> list[str]:
-  from opendbc.car.tests.car_diff import PADDING, find_edges, format_numeric_diffs, format_timing, group_frames, render_waveform
+  from opendbc.car.tests.car_diff import format_diff
   lines = []
   for k, getter in enumerate(STATE):
     name = getter.removeprefix("get_")
@@ -146,21 +153,10 @@ def state_diffs(a, b) -> list[str]:
     if not len(frames):
       continue
     diffs = [(name, int(i), (value(old[i], name), value(new[i], name)), int(i * DT * 1e9)) for i in frames]
+    ref = [(int(i * DT * 1e9), StateWrap(name, value(v, name))) for i, v in enumerate(old)]
+    states = [StateWrap(name, value(v, name)) for v in new]
     lines.append(f"\n  {name} ({len(diffs)} diffs)")
-    if name not in BOOL_STATE:
-      lines += format_numeric_diffs(diffs)
-      continue
-    groups = group_frames(diffs)
-    for group in groups[:MAX_GROUPS]:
-      start, end = max(0, group[0][1] - PADDING), min(group[-1][1] + PADDING + 1, len(old))
-      master, pr = [bool(v) for v in old[start:end]], [bool(v) for v in new[start:end]]
-      lines += [f"\n  frames {start}-{end - 1}", render_waveform("master", master), render_waveform("PR", pr)]
-      for edge, m, p in zip(("rise", "fall"), find_edges(master), find_edges(pr), strict=True):
-        timing = format_timing(edge, m, p, DT * 1000)
-        if timing:
-          lines.append(timing)
-    if len(groups) > MAX_GROUPS:
-      lines.append(f"    (... {len(groups) - MAX_GROUPS} more)")
+    lines += format_diff(diffs, ref, states, name)
   return lines
 
 
