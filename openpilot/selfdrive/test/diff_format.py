@@ -1,4 +1,4 @@
-# the layout of the diff report comments, light to import: CI jobs without a build use it
+# the layout of the diff report comments
 
 
 def format_report(title: str, description: str, changes: list[list[str]], n_passed: int, errors: list[str], notes: list[str] | None = None,

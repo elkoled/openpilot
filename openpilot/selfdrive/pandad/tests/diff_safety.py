@@ -18,7 +18,7 @@ import numpy as np
 
 from opendbc.car import DT_CTRL as DT
 
-# GitHub's comment limit is 65536, process replay's report shares it
+# GitHub's comment limit is 65536
 MAX_REPORT = 50000
 # the panda's CAN buses, a log's can src is bus + 4 * panda
 BUSES = 3
