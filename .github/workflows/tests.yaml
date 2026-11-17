@@ -187,20 +187,21 @@ jobs:
     steps:
     - uses: actions/checkout@v7
       with:
-        submodules: true
         # the parent is master, or the previous master commit on a push
         fetch-depth: 2
     - run: ./tools/op.sh setup
+    - name: Check for an opendbc change
+      id: opendbc
+      run: openpilot/selfdrive/pandad/tests/diff_safety.py check >> "$GITHUB_OUTPUT"
     - name: Cache the test routes
+      if: steps.opendbc.outputs.changed == 'true'
       uses: actions/cache@v6
       with:
         path: /tmp/comma_download_cache
         key: safety-replay-${{ hashFiles('opendbc_repo/opendbc/car/tests/routes.py') }}
         restore-keys: safety-replay-
-    # the report reuses process replay's diff report layout
-    - name: Build openpilot
-      run: scons
     - name: Compare safety with the previous opendbc
+      if: steps.opendbc.outputs.changed == 'true'
       timeout-minutes: 20
       run: openpilot/selfdrive/pandad/tests/diff_safety.py
     - name: Upload diff report
