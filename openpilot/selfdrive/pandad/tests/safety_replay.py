@@ -14,10 +14,10 @@ from pathlib import Path
 from opendbc.car.tests.routes import routes
 from opendbc.car.tests.test_models import NUM_JOBS, JOB_ID
 from opendbc.safety.tests.libsafety import libsafety_py
-from opendbc.safety.tests.safety_replay.route_replay import BUSES, DT, load, replay
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.utils import retry
+from openpilot.selfdrive.pandad.tests.safety_diff import BUSES, DT, load, replay
 
 SECONDS_PER_ROUTE = 10
 # seconds until the RX checks are compared

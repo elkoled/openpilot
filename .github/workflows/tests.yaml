@@ -199,7 +199,7 @@ jobs:
         restore-keys: safety-replay-
     - name: Compare safety with the previous opendbc
       timeout-minutes: 20
-      run: openpilot/selfdrive/pandad/tests/safety_diff.sh HEAD^
+      run: openpilot/selfdrive/pandad/tests/safety_diff.py
 
   simulator_driving:
     name: simulator driving
