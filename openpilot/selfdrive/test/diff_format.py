@@ -1,9 +1,12 @@
 # the layout of the diff report comments
 
+# GitHub's comment limit is 65536, the rest is room for the tag the comment action adds
+MAX_COMMENT = 65000
+
 
 def format_report(title: str, description: str, changes: list[tuple[str, list[str]]], n_passed: int, errors: list[str],
-                  max_len: int | None = None) -> str:
-  # changes: each changed item's name and its lines, max_len: as many changes as fit
+                  max_len: int | None = MAX_COMMENT) -> str:
+  # changes: each changed item's name and its lines, max_len: as many changes as fit, None for all
   icon = "⚠️" if changes or errors else "✅"
   lines = [
     f"## {title}",

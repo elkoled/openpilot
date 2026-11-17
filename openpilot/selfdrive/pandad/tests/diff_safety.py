@@ -283,7 +283,7 @@ def diff_report(base: Path, new: Path) -> int:
   from openpilot.selfdrive.test.diff_format import format_report
 
   description = "Replays every car test route through this PR's panda safety and compares the behavior to master."
-  full = format_report("Safety replay diff report", description, changed_full, n_passed, errors)
+  full = format_report("Safety replay diff report", description, changed_full, n_passed, errors, max_len=None)
   (Path(BASEDIR) / "diff_safety_full.txt").write_text(full)
   # the comment shows as many routes as fit, the full report is in the job's artifact
   report = format_report("Safety replay diff report", description, changed, n_passed, errors, max_len=MAX_REPORT)
