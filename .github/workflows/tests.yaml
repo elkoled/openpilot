@@ -197,6 +197,9 @@ jobs:
         path: /tmp/comma_download_cache
         key: safety-replay-${{ hashFiles('opendbc_repo/opendbc/car/tests/routes.py') }}
         restore-keys: safety-replay-
+    # the report reuses process replay's diff report layout
+    - name: Build openpilot
+      run: scons
     - name: Compare safety with the previous opendbc
       timeout-minutes: 20
       run: openpilot/selfdrive/pandad/tests/diff_safety.py

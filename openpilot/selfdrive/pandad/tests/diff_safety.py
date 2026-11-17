@@ -86,7 +86,7 @@ def dump_route(args):
     with open(out / f"{i}.pkl", "wb") as f:
       pickle.dump((route.route, str(route.car_model), *load(route, tx=True)), f)
   except Exception as e:
-    return f"ERROR {route.car_model} - {route.route}: can't load, {e!r}"
+    return f"{route.car_model} - {route.route}: can't load, {e!r}"
   return None
 
 
@@ -167,7 +167,7 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
       route, model, mode, _, frames = pickle.load(f)
     a, b = np.load(base / f"{dump.stem}.npz"), np.load(new / f"{dump.stem}.npz")
     if "ok" not in b:
-      errors.append(f"ERROR {model} - {route}: this opendbc has no safety mode {mode}")
+      errors.append(f"{model} - {route}: this opendbc has no safety mode {mode}")
     elif "ok" not in a:
       new_cars.append(f"\nNEW {model} - {route}: master's opendbc has no safety mode {mode}")
     else:
@@ -177,21 +177,12 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
       else:
         n_passed += 1
 
-  icon = "⚠️" if changed or errors else "✅"
-  lines = [
-    "## Safety replay diff report",
-    "Replays every car test route through master's and this PR's panda safety and compares each RX and TX result and the safety state.",
-    "Please review any changes carefully to ensure they are expected.\n",
-    f"{icon}  {len(changed)} changed, {n_passed} passed, {len(errors)} errors" + (f", {len(new_cars)} new" if new_cars else ""),
-  ]
-  lines += [f"\n{e}" for e in errors] + new_cars
-  if changed:
-    lines.append("<details><summary><b>Show changes</b></summary>\n\n```")
-    for route_lines in changed:
-      lines += route_lines
-    lines.append("```\n</details>")
-  REPORT.write_text("\n".join(lines) + "\n")
-  print("\n".join(lines))
+  from openpilot.selfdrive.test.process_replay.diff_report import format_report
+  report = format_report("Safety replay diff report",
+                         "Replays every car test route through master's and this PR's panda safety and compares each RX and TX result and the safety state.",
+                         changed, n_passed, errors, new_cars)
+  REPORT.write_text(report)
+  print(report)
   return int(bool(changed or errors))
 
 
