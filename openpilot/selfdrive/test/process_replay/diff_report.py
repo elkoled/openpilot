@@ -53,6 +53,25 @@ def diff_format(diffs, ref, new, field) -> list[str]:
   return format_diff(diffs, ref_ts, new_wrapped, field)
 
 
+def format_report(title: str, description: str, changes: list[list[str]], n_passed: int, errors: list[str], notes: list[str] | None = None,
+                  n_changed: int | None = None) -> str:
+  icon = "⚠️" if changes else "✅"
+  lines = [
+    f"## {title}",
+    description,
+    "Please review any changes carefully to ensure they are expected.\n",
+    f"{icon}  {len(changes) if n_changed is None else n_changed} changed, {n_passed} passed, {len(errors)} errors",
+  ]
+  lines += [f"\nERROR {e}" for e in errors]
+  lines += notes or []
+  if changes:
+    lines.append("<details><summary><b>Show changes</b></summary>\n\n```")
+    for change in changes:
+      lines += change
+    lines.append("```\n</details>")
+  return "\n".join(lines)
+
+
 def diff_report(replay_diffs, segments) -> None:
   seg_to_plat = {seg: plat for plat, seg in segments}
 
@@ -66,28 +85,18 @@ def diff_report(replay_diffs, segments) -> None:
     else:
       with_diffs.append((plat, seg, proc, data))
 
-  icon = "⚠️" if with_diffs else "✅"
-  lines = [
-    "## Process replay diff report",
-    "Replays driving segments through this PR and compares the behavior to master.",
-    "Please review any changes carefully to ensure they are expected.\n",
-    f"{icon}  {len(with_diffs)} changed, {n_passed} passed, {len(errors)} errors",
-  ]
+  changes = []
+  for plat, seg, proc, (diffs, ref, new) in with_diffs:
+    lines = [f"\n{plat} - {seg} [{proc}]"]
+    by_field = defaultdict(list)
+    for d in diffs:
+      by_field[d[0]].append(d)
+    for field, fd in sorted(by_field.items()):
+      lines.append(f"\n  {field} ({len(fd)} diffs)")
+      lines.extend(diff_format(fd, ref, new, field))
+    changes.append(lines)
 
-  for plat, seg, proc, err in errors:
-    lines.append(f"\nERROR {plat} - {seg} [{proc}]: {err}")
-
-  if with_diffs:
-    lines.append("<details><summary><b>Show changes</b></summary>\n\n```")
-    for plat, seg, proc, (diffs, ref, new) in with_diffs:
-      lines.append(f"\n{plat} - {seg} [{proc}]")
-      by_field = defaultdict(list)
-      for d in diffs:
-        by_field[d[0]].append(d)
-      for field, fd in sorted(by_field.items()):
-        lines.append(f"\n  {field} ({len(fd)} diffs)")
-        lines.extend(diff_format(fd, ref, new, field))
-    lines.append("```\n</details>")
-
+  report = format_report("Process replay diff report", "Replays driving segments through this PR and compares the behavior to master.",
+                         changes, n_passed, [f"{plat} - {seg} [{proc}]: {err}" for plat, seg, proc, err in errors])
   with open(os.path.join(PROC_REPLAY_DIR, "diff_report.txt"), "w") as f:
-    f.write("\n".join(lines))
+    f.write(report)
