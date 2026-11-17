@@ -251,7 +251,7 @@ def state_diffs(a, b, full: bool = False) -> list[str]:
 
 
 def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
-  changed, changed_full, new_cars, n_passed = [], [], [], 0
+  changed, changed_full, n_passed = [], [], 0
   for dump in sorted(dumps.glob("*.pkl"), key=lambda p: int(p.stem)):
     with open(dump, "rb") as f:
       route, model, mode, _, frames = pickle.load(f)
@@ -259,7 +259,9 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
     if "ok" not in b:
       errors.append(f"{model} - {route}: this opendbc has no safety mode {mode}")
     elif "ok" not in a:
-      new_cars.append(f"\nNEW {model} - {route}: master's opendbc has no safety mode {mode}")
+      new_mode = (f"{model} - {route}", ["", f"  new safety mode {mode}, master's opendbc doesn't have it"])
+      changed.append(new_mode)
+      changed_full.append(new_mode)
     else:
       messages, config, states = message_diffs(frames, a, b), config_diffs(a, b), state_diffs(a, b)
       if messages or config or states:
@@ -272,10 +274,10 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
   from openpilot.selfdrive.test.diff_format import format_report
 
   description = "Replays every car test route through this PR's panda safety and compares the behavior to master."
-  full = format_report("Safety replay diff report", description, changed_full, n_passed, errors, new_cars)
+  full = format_report("Safety replay diff report", description, changed_full, n_passed, errors)
   (Path(BASEDIR) / "diff_safety_full.txt").write_text(full)
   # the comment shows as many routes as fit, the full report is in the job's artifact
-  report = format_report("Safety replay diff report", description, changed, n_passed, errors, new_cars, max_len=MAX_REPORT)
+  report = format_report("Safety replay diff report", description, changed, n_passed, errors, max_len=MAX_REPORT)
   print(report)
   (Path(BASEDIR) / "diff_safety.txt").write_text(report)
   return int(bool(changed or errors))

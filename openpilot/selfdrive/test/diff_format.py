@@ -2,7 +2,7 @@
 
 
 def format_report(title: str, description: str, changes: list[tuple[str, list[str]]], n_passed: int, errors: list[str],
-                  notes: list[str] | None = None, max_len: int | None = None) -> str:
+                  max_len: int | None = None) -> str:
   # changes: each changed item's name and its lines, max_len: as many changes as fit
   icon = "⚠️" if changes else "✅"
   lines = [
@@ -11,7 +11,6 @@ def format_report(title: str, description: str, changes: list[tuple[str, list[st
     "Please review any changes carefully to ensure they are expected.\n",
     f"{icon}  {len(changes)} changed, {n_passed} passed, {len(errors)} errors",
   ]
-  lines += notes or []
   if errors:
     lines.append("<details><summary><b>Show errors</b></summary>\n\n```")
     lines += [f"\n{e}" for e in dict.fromkeys(errors)]
