@@ -117,6 +117,30 @@ def state_layout(ffi):
   return fields
 
 
+def cdata_fields(ffi, c, path: str) -> dict:
+  # every value of a struct or array by name, pointers left out
+  if not isinstance(c, ffi.CData):
+    return {path: c}
+  t = ffi.typeof(c)
+  if t.kind == "struct":
+    return {k: v for name, _ in t.fields for k, v in cdata_fields(ffi, getattr(c, name), f"{path}.{name}").items()}
+  if t.kind == "array":
+    return {k: v for i in range(t.length) for k, v in cdata_fields(ffi, c[i], f"{path}[{i}]").items()}
+  return {}
+
+
+def safety_config(ffi, safety) -> tuple[list[str], dict]:
+  # the RX checks and allowed TX messages, named by message so a reordered config isn't a change
+  cfg = safety.safety_a.setup.current_safety_config
+  rx = [f"0x{cfg.rx_checks[i].msg[0].addr:x} bus {cfg.rx_checks[i].msg[0].bus}" for i in range(cfg.rx_checks_len)]
+  config = {"disable_forwarding": cfg.disable_forwarding}
+  for i, name in enumerate(rx):
+    config |= cdata_fields(ffi, cfg.rx_checks[i], f"rx_checks[{name}]")
+  for i in range(cfg.tx_msgs_len):
+    config |= cdata_fields(ffi, cfg.tx_msgs[i], f"tx_msgs[0x{cfg.tx_msgs[i].addr:x} bus {cfg.tx_msgs[i].bus}]")
+  return rx, config
+
+
 def results_route(args):
   # every message's result (RX valid or TX allowed), where each RX is forwarded, and each safety state field after each step
   path, out, build = args
@@ -135,8 +159,16 @@ def results_route(args):
   steps = replay(mode, param, frames)
   results = [r for step_results, _ in steps for r in step_results]
   raw = np.frombuffer(b"".join(state for _, state in steps), dtype=np.uint8).reshape(len(steps), -1)
-  arrays: dict[str, Any] = {f"state:{name}": raw[:, offset:offset + size].copy().view(dtype)[:, 0]
-                            for name, offset, size, dtype in state_layout(libsafety_py.ffi)}
+  rx, config = safety_config(libsafety_py.ffi, libsafety_py.libsafety)
+  arrays: dict[str, Any] = {f"config:{name}": np.array(v) for name, v in config.items()}
+  for name, offset, size, dtype in state_layout(libsafety_py.ffi):
+    # an RX check's status by its message, unused slots left out
+    if name.startswith("rx_status["):
+      i, field = int(name[len("rx_status["):name.index("]")]), name[name.index("]") + 1:]
+      if i >= len(rx):
+        continue
+      name = f"rx_status[{rx[i]}]{field}"
+    arrays[f"state:{name}"] = raw[:, offset:offset + size].copy().view(dtype)[:, 0]
   arrays["ok"] = np.array([r[0] if isinstance(r, tuple) else r for r in results], dtype=bool)
   arrays["fwd"] = np.array([r[1] if isinstance(r, tuple) else -2 for r in results], dtype=np.int16)
   np.savez_compressed(out / path.with_suffix(".npz").name, **arrays)
@@ -180,6 +212,17 @@ class StateWrap:
     return self._d
 
 
+def config_diffs(a, b) -> list[str]:
+  lines = []
+  for key in sorted(k for k in a.keys() | b.keys() if k.startswith("config:")):
+    name = key.removeprefix("config:")
+    if key not in a or key not in b:
+      lines.append(f"\n  config {name}: only in {'master' if key in a else 'this PR'}")
+    elif a[key] != b[key]:
+      lines.append(f"\n  config {name}: {value(a[key])} -> {value(b[key])}")
+  return lines
+
+
 def state_diffs(a, b, full: bool = False) -> list[str]:
   # full: every changed frame instead of the first ones, for the report in the artifact
   from opendbc.car.tests.car_diff import format_diff, format_numeric_diffs
@@ -218,10 +261,10 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
     elif "ok" not in a:
       new_cars.append(f"\nNEW {model} - {route}: master's opendbc has no safety mode {mode}")
     else:
-      messages, states = message_diffs(frames, a, b), state_diffs(a, b)
-      if messages or states:
-        changed.append([f"\n{model} - {route}"] + messages + states)
-        changed_full.append([f"\n{model} - {route}"] + messages + state_diffs(a, b, full=True))
+      messages, config, states = message_diffs(frames, a, b), config_diffs(a, b), state_diffs(a, b)
+      if messages or config or states:
+        changed.append([f"\n{model} - {route}"] + messages + config + states)
+        changed_full.append([f"\n{model} - {route}"] + messages + config + state_diffs(a, b, full=True))
       else:
         n_passed += 1
 
@@ -235,15 +278,11 @@ def diff_report(dumps: Path, base: Path, new: Path, errors: list[str]) -> int:
   (Path(BASEDIR) / "diff_safety_full.txt").write_text(fmt(changed_full, []))
 
   # the comment shows as many routes as fit, the full report is in the job's artifact
-  notes = []
-  if changed and "GITHUB_RUN_ID" in os.environ:
-    run = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-    notes.append(f"\nEvery changed frame: diff_safety_full.txt in {run}")
   n = len(changed)
-  while n and len(fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]], notes)) > MAX_REPORT:
+  while n and len(fmt(changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]], [])) > MAX_REPORT:
     n -= 1
   shown = changed if n == len(changed) else changed[:n] + [[f"\n(... {len(changed) - n} more routes)"]]
-  report = fmt(shown, notes)
+  report = fmt(shown, [])
   print(report)
   (Path(BASEDIR) / "diff_safety.txt").write_text(report)
   return int(bool(changed or errors))
