@@ -16,7 +16,7 @@ from opendbc.car.tests.test_models import NUM_JOBS, JOB_ID
 from opendbc.safety.tests.libsafety import libsafety_py
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.hardware import HARDWARE
-from openpilot.selfdrive.pandad.tests.safety_diff import BUSES, DT, load, replay
+from openpilot.selfdrive.pandad.tests.diff_safety import BUSES, DT, load, replay
 
 SECONDS_PER_ROUTE = 10
 # seconds until the RX checks are compared
@@ -36,7 +36,7 @@ def inputs() -> str:
   files = sorted((root / "panda/board/obj").glob("*.bin.signed"))
   for d in ("opendbc_repo/opendbc", "panda/python"):
     files += sorted(f for f in (root / d).rglob("*") if f.is_file() and f.suffix not in BUILD_OUTPUTS and "__pycache__" not in f.parts)
-  files += [Path(__file__).resolve(), Path(__file__).with_name("safety_diff.py").resolve(), root / "openpilot/selfdrive/pandad/pandad.py"]
+  files += [Path(__file__).resolve(), Path(__file__).with_name("diff_safety.py").resolve(), root / "openpilot/selfdrive/pandad/pandad.py"]
   h = hashlib.sha256()
   for f in files:
     h.update(str(f.relative_to(root)).encode() + b"\0" + f.read_bytes())
